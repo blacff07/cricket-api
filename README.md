@@ -26,7 +26,7 @@ Supports deployment on **Vercel** and **Docker**. No API key required.
    ```
 2. Run the development server:
    ```bash
-   python app/main.py
+   python -m app.main
    ```
    The API will be available at http://localhost:5001.
 
