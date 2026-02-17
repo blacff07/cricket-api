@@ -1,0 +1,20 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "app/main.py",
+      "use": "@vercel/python"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "app/main.py"
+    }
+  ],
+  "env": {
+    "SECRET_KEY": "@secret_key",
+    "CORS_ORIGINS": "@cors_origins",
+    "FLASK_DEBUG": "false"
+  }
+}

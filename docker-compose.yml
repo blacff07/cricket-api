@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  api:
+    build: .
+    container_name: cricket-api
+    ports:
+      - "5001:5001"
+    environment:
+      - SECRET_KEY=dev-secret-key
+      - CORS_ORIGINS=http://localhost:5001,http://127.0.0.1:5001
+      - FLASK_DEBUG=true
+      - PORT=5001
+      - HOST=0.0.0.0
+    restart: unless-stopped
