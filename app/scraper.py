@@ -1,6 +1,7 @@
 import re
 import random
 import requests
+import logging
 from bs4 import BeautifulSoup
 from .config import Config
 
