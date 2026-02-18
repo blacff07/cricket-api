@@ -8,24 +8,24 @@ Designed for easy deployment on **Vercel** and **Docker**. No API key required.
 
 ## Features
 
-- **`/live-matches`** – List all currently live matches with their IDs.
-- **`/score?id=<match_id>`** – Detailed scorecard for a specific match (batsmen, bowlers, run rate, etc.).
-- **`/score/live?id=<match_id>`** – Same data nested in a `livescore` object (convenient for frontend apps).
-- Clean, modular code with Flask application factory pattern.
-- Configurable via environment variables.
-- Supports both direct execution and serverless deployment.
+- **`/live-matches`** – List all currently live matches with their IDs
+- **`/score?id=<match_id>`** – Detailed scorecard (batsmen, bowlers, run rate)
+- **`/score/live?id=<match_id>`** – Same data wrapped in a `livescore` object
+- Clean, modular code with Flask application factory pattern
+- Configurable via environment variables
+- Supports direct execution, Docker, and serverless deployment
 
 ---
 
 ## Tech Stack
 
-- **Python 3.11+**
-- **Flask** – Web framework
-- **BeautifulSoup4 / lxml** – HTML parsing
-- **Requests** – HTTP client
-- **Flask-CORS** – Cross‑origin resource sharing
-- **Gunicorn** – Production WSGI server (for Docker)
-- **Vercel** – Serverless deployment
+- Python 3.11+
+- Flask – Web framework
+- BeautifulSoup4 / lxml – HTML parsing
+- Requests – HTTP client
+- Flask-CORS – Cross‑origin resource sharing
+- Gunicorn – Production WSGI server (for Docker)
+- Vercel – Serverless deployment
 
 ---
 
@@ -53,22 +53,13 @@ pip install -r requirements.txt
 
 4. Run the development server
 
-You can start the app in two ways:
-
-Using python -m (recommended for local development)
-
 ```bash
 python -m app.main
 ```
 
-Using Flask CLI
+The API will be available at http://localhost:5001
 
-```bash
-flask --app app.main:create_app run
-```
-
-The API will be available at http://localhost:5001 (default port).
-To change the port, set the PORT environment variable:
+To change the port:
 
 ```bash
 PORT=8080 python -m app.main
@@ -90,63 +81,67 @@ Run the container
 docker run -p 5001:5001 cricket-api
 ```
 
-Or use Docker Compose:
+Or use Docker Compose
 
 ```bash
 docker-compose up
 ```
 
-The API will be available at http://localhost:5001.
+The API will be available at http://localhost:5001
 
 ---
 
 Deploy to Vercel
 
-1. Install Vercel CLI and log in
+Step 1: Push your code to GitHub
+
+Create a repository on GitHub and push your code:
 
 ```bash
-npm i -g vercel
-vercel login
+git init
+git add .
+git commit -m "Initial commit"
+git branch -M main
+git remote add origin https://github.com/yourusername/cricket-api.git
+git push -u origin main
 ```
 
-2. Deploy
+Step 2: Import your project on Vercel
 
-From the project root, run:
+1. Go to vercel.com
+2. Click "Add New..." → "Project"
+3. Import your GitHub repository
+4. Vercel will automatically detect the Python configuration
+5. Click "Deploy"
 
-```bash
-vercel
-```
+Step 3: Configure environment variables (optional)
 
-Follow the prompts. Vercel will automatically detect the Python configuration.
+If you need to change defaults, go to your project dashboard → Settings → Environment Variables and add:
 
-3. (Optional) Configure environment variables
+Name Value Description
+CORS_ORIGINS https://yourdomain.com Comma‑separated allowed origins
 
-If you need to change the default port or CORS origins, you can set them in the Vercel dashboard under Settings > Environment Variables:
+Step 4: Deploy
 
-· PORT – default 5001 (usually not needed, Vercel assigns its own)
-· HOST – default 0.0.0.0
-· CORS_ORIGINS – comma‑separated list, e.g., https://yourfrontend.com
+Vercel automatically deploys when you push to the main branch.
+Your API will be available at https://cricket-api.vercel.app
 
 ---
 
 Environment Variables
 
-Variable Description Default
-PORT Port on which the app runs (used by Gunicorn) 5001
-HOST Host to bind to 0.0.0.0
-CORS_ORIGINS Comma‑separated allowed origins for CORS http://localhost:5001,http://127.0.0.1:5001
+Variable Default Description
+PORT 5001 Port for the app (set by Vercel automatically)
+HOST 0.0.0.0 Host to bind to
+CORS_ORIGINS http://localhost:5001,http://127.0.0.1:5001 Comma‑separated allowed origins
 
-All variables are optional. No secrets or API keys are required.
+All variables are optional. No API keys required.
 
 ---
 
 API Endpoints
 
 GET /
-
-Returns a simple welcome message.
-
-Response:
 
 ```json
 {
@@ -156,10 +151,6 @@ Response:
 ```
 
 GET /live-matches
-
-Returns a list of all matches currently live on Cricbuzz.
-
-Response:
 
 ```json
 {
@@ -174,11 +165,7 @@ Response:
 }
 ```
 
-GET /score?id=<match_id>
-
-Returns detailed score information for a specific match.
-
-Response:
+GET /score?id=139252
 
 ```json
 {
@@ -207,50 +194,35 @@ Response:
 }
 ```
 
-If data is not available, all fields will contain "Data Not Found".
-
-GET /score/live?id=<match_id>
-
-Same data as /score but wrapped in a livescore object, with a success flag.
-
-Response (successful):
+GET /score/live?id=139252
 
 ```json
 {
   "success": "true",
   "livescore": {
-    "title": "...",
-    "update": "...",
-    "current": "...",
-    "runrate": "...",
-    "batsman": "...",
-    "batsmanrun": "...",
-    "ballsfaced": "...",
-    "sr": "...",
-    "batsmantwo": "...",
-    "batsmantworun": "...",
-    "batsmantwoballfaced": "...",
-    "batsmantwosr": "...",
-    "bowler": "...",
-    "bowlerover": "...",
-    "bowlerruns": "...",
-    "bowlerwickets": "...",
-    "bowlereconomy": "...",
-    "bowlertwo": "...",
-    "bowlertwoover": "...",
-    "bowlertworuns": "...",
-    "bowlertwowickets": "...",
-    "bowlertwoeconomy": "..."
+    "title": "New Zealand vs Canada, 31st Match, Group D, ICC Men's T20 World Cup 2026",
+    "update": "CAN opt to bat",
+    "current": "CAN 70-0 (8.3)",
+    "runrate": "CRR: 8.43",
+    "batsman": "Dilpreet Bajwa",
+    "batsmanrun": "28",
+    "ballsfaced": "(29)",
+    "sr": "96.55",
+    "batsmantwo": "Yuvraj Samra",
+    "batsmantworun": "39",
+    "batsmantwoballfaced": "(22)",
+    "batsmantwosr": "177.27",
+    "bowler": "Cole McConchie",
+    "bowlerover": "3",
+    "bowlerruns": "20",
+    "bowlerwickets": "0",
+    "bowlereconomy": "6.66",
+    "bowlertwo": "Kyle Jamieson",
+    "bowlertwoover": "3",
+    "bowlertworuns": "24",
+    "bowlertwowickets": "0",
+    "bowlertwoeconomy": "8.00"
   }
-}
-```
-
-Response (failure):
-
-```json
-{
-  "success": "false",
-  "livescore": {}
 }
 ```
 
@@ -263,17 +235,58 @@ cricket-api/
 ├── app/
 │   ├── __init__.py
 │   ├── main.py          # Flask app factory and routes
-│   ├── scraper.py       # Scraping logic (Cricbuzz)
-│   ├── utils.py         # Helper functions (logging, error responses)
-│   └── config.py        # Configuration from environment variables
+│   ├── scraper.py       # Scraping logic
+│   ├── utils.py         # Helper functions
+│   └── config.py        # Configuration
 ├── requirements.txt
 ├── vercel.json
 ├── Dockerfile
 ├── .dockerignore
 ├── .gitignore
 ├── README.md
-└── docker-compose.yml   (optional, for local development)
+└── docker-compose.yml
 ```
+
+---
+
+Testing the API
+
+Get live matches
+
+```bash
+curl https://your-app.vercel.app/live-matches
+```
+
+Get score for a match
+
+```bash
+curl https://your-app.vercel.app/score?id=139252
+```
+
+Get formatted live score
+
+```bash
+curl https://your-app.vercel.app/score/live?id=139252
+```
+
+---
+
+Troubleshooting
+
+Common Vercel deployment issues
+
+Issue Solution
+"Module not found" Ensure requirements.txt includes all dependencies
+Import errors Use relative imports (from .module import ...)
+Timeout Increase timeout in config.py (default 10s)
+CORS errors Set CORS_ORIGINS environment variable
+
+Local development issues
+
+Issue Solution
+ImportError Run with python -m app.main not python app/main.py
+Port already in use Change port with PORT=8080 python -m app.main
+Missing logger Ensure import logging in all files that use logger
 
 ---
 
@@ -281,4 +294,42 @@ License
 
 MIT
 
+---
+
+Author
+
+Your Name – GitHub
+
+---
+
+Support
+
+For issues or questions, please open an issue on GitHub.
+
 ```
+
+## Vercel Hosting Steps (Plain Text)
+
+1. **Push code to GitHub**
+   ```bash
+   git init
+   git add .
+   git commit -m "Initial commit"
+   git branch -M main
+   git remote add origin https://github.com/yourusername/cricket-api.git
+   git push -u origin main
+```
+
+1. Go to Vercel (https://vercel.com)
+   · Sign in with GitHub
+   · Click "Add New" → "Project"
+   · Select your repository
+   · Click "Deploy" (no configuration needed)
+2. Your API is live!
+      URL: https://cricket-api.vercel.app
+3. Test it
+   ```bash
+   curl https://cricket-api.vercel.app/live-matches
+   ```
+
+No environment variables needed. Just works.
