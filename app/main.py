@@ -121,7 +121,7 @@ def create_app():
 
     return app
 
-# For local development with `python app/main.py`
+# For local development with `python -m app.main`
 if __name__ == '__main__':
     app = create_app()
-    app.run(host=Config.HOST, port=Config.PORT, debug=Config.DEBUG)
+    app.run(host=Config.HOST, port=Config.PORT, debug=True)
