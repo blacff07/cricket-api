@@ -93,6 +93,11 @@ def detect_match_state(soup):
     if complete_div:
         return "completed"
     
+    # Check for match result indicators (team won)
+    result_text = soup.find(string=re.compile(r'won by|win by', re.I))
+    if result_text:
+        return "completed"
+    
     # Check for innings break
     innings_div = soup.find('div', string=re.compile(r'Innings Break', re.I))
     if innings_div:
@@ -131,22 +136,44 @@ def extract_match_data(soup):
         second_part = title.split(' vs ')[1]
         teams.append(second_part.split(',')[0].strip())
 
-    # Status (update)
+    # Status (update) - FIXED VERSION
     status = 'Match Stats will Update Soon...'
-    match_bar = soup.find('div', class_=lambda c: c and 'bg-[#4a4a4a]' in c)
-    if match_bar:
-        links = match_bar.find_all('a', title=True)
-        for link in links:
-            if ' vs ' in link.get('title', ''):
-                title_attr = link['title']
-                parts = title_attr.split('-')
-                if len(parts) > 1:
-                    status = parts[-1].strip()
-                    break
+    
+    # Method 1: Look for the match status in the main header or score area
+    status_elements = soup.find_all(['div', 'span'], string=re.compile(r'(won|live|stumps|innings break|rain|abandoned|opt to bat|opt to field|target|need|required|overnight)', re.I))
+    for elem in status_elements:
+        if elem.text and len(elem.text.strip()) < 50:  # Avoid long paragraphs
+            possible_status = elem.text.strip()
+            # Make sure it's not part of a larger title
+            if any(keyword in possible_status.lower() for keyword in ['won', 'live', 'stumps', 'innings', 'rain', 'abandoned', 'opt', 'target', 'need', 'required', 'overnight']):
+                status = possible_status
+                break
+    
+    # Method 2: If not found, try the match bar (more specific targeting)
+    if status == 'Match Stats will Update Soon...':
+        match_bar = soup.find('div', class_=lambda c: c and 'bg-[#4a4a4a]' in c)
+        if match_bar:
+            # Find the specific match link in the bar - it's usually the first one
+            match_links = match_bar.find_all('a', title=True)
+            for link in match_links[:3]:  # Only check first few links
+                title_attr = link.get('title', '')
+                if ' vs ' in title_attr:
+                    parts = title_attr.split('-')
+                    if len(parts) > 1:
+                        candidate = parts[-1].strip()
+                        # Verify this looks like a valid status (not a team name from another match)
+                        if not any(team in candidate for team in ['IND', 'PAK', 'AUS', 'ENG', 'NZ', 'SA', 'SL', 'WI', 'AFG', 'BAN', 'ZIM']):
+                            status = candidate
+                            break
+    
+    # Method 3: Look for cb-text-* class (Cricbuzz's status indicator)
     if status == 'Match Stats will Update Soon...':
         status_div = soup.find('div', class_=lambda c: c and 'cb-text-' in c)
         if status_div:
-            status = status_div.text.strip()
+            candidate = status_div.text.strip()
+            # Filter out team names masquerading as status
+            if not any(team in candidate for team in ['IND', 'PAK', 'AUS', 'ENG', 'NZ', 'SA', 'SL', 'WI', 'AFG', 'BAN', 'ZIM']):
+                status = candidate
 
     # Match state
     match_state = detect_match_state(soup)
