@@ -1,5 +1,6 @@
 import logging
 import time
+from functools import wraps
 from functools import lru_cache
 from flask import Flask, jsonify, request
 from flask_cors import CORS
@@ -13,10 +14,11 @@ from .scraper import fetch_page, extract_live_matches, extract_match_data
 setup_logging()
 logger = logging.getLogger(__name__)
 
-# Simple in-memory cache
+# Simple in-memory cache with proper function name preservation
 def cache_ttl(seconds=Config.CACHE_TTL):
     def decorator(func):
         cache = {}
+        @wraps(func)  # This preserves the original function name
         def wrapper(*args, **kwargs):
             key = str(args) + str(kwargs)
             if key in cache:
