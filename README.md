@@ -1,39 +1,92 @@
-# Cricket API – Live Scores from Cricbuzz
+```markdown
+# Cricket API – Live Cricket Scores from Cricbuzz
 
 A production‑ready Flask API that scrapes live cricket scores from Cricbuzz.  
-Supports deployment on **Vercel** and **Docker**. No API key required.
+Designed for easy deployment on **Vercel** and **Docker**. No API key required.
+
+---
 
 ## Features
 
 - **`/live-matches`** – List all currently live matches with their IDs.
 - **`/score?id=<match_id>`** – Detailed scorecard for a specific match (batsmen, bowlers, run rate, etc.).
 - **`/score/live?id=<match_id>`** – Same data nested in a `livescore` object (convenient for frontend apps).
+- Clean, modular code with Flask application factory pattern.
+- Configurable via environment variables.
+- Supports both direct execution and serverless deployment.
 
-## Quick Start
+---
 
-### Local Development
+## Tech Stack
 
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/yourusername/cricket-api.git
-   cd cricket-api
-   ```
-1. Create a virtual environment and install dependencies:
-   ```bash
-   python -m venv venv
-   source venv/bin/activate   # On Windows: venv\Scripts\activate
-   pip install -r requirements.txt
-   ```
-2. Run the development server:
-   ```bash
-   python -m app.main
-   ```
-   The API will be available at http://localhost:5001.
+- **Python 3.11+**
+- **Flask** – Web framework
+- **BeautifulSoup4 / lxml** – HTML parsing
+- **Requests** – HTTP client
+- **Flask-CORS** – Cross‑origin resource sharing
+- **Gunicorn** – Production WSGI server (for Docker)
+- **Vercel** – Serverless deployment
 
-Run with Docker
+---
+
+## Local Development
+
+### 1. Clone the repository
+
+```bash
+git clone https://github.com/yourusername/cricket-api.git
+cd cricket-api
+```
+
+2. Create a virtual environment
+
+```bash
+python -m venv venv
+source venv/bin/activate      # On Windows: venv\Scripts\activate
+```
+
+3. Install dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+4. Run the development server
+
+You can start the app in two ways:
+
+Using python -m (recommended for local development)
+
+```bash
+python -m app.main
+```
+
+Using Flask CLI
+
+```bash
+flask --app app.main:create_app run
+```
+
+The API will be available at http://localhost:5001 (default port).
+To change the port, set the PORT environment variable:
+
+```bash
+PORT=8080 python -m app.main
+```
+
+---
+
+Running with Docker
+
+Build the image
 
 ```bash
 docker build -t cricket-api .
+```
+
+Run the container
+
+```bash
 docker run -p 5001:5001 cricket-api
 ```
 
@@ -43,29 +96,64 @@ Or use Docker Compose:
 docker-compose up
 ```
 
+The API will be available at http://localhost:5001.
+
+---
+
 Deploy to Vercel
 
-1. Install the Vercel CLI and log in:
-   ```bash
-   npm i -g vercel
-   vercel login
-   ```
-2. In the project root, run:
-   ```bash
-   vercel
-   ```
-   Follow the prompts. Vercel will automatically detect the Python environment.
-3. Set the required environment variables in the Vercel dashboard:
-   · CORS_ORIGINS – comma‑separated list of allowed origins (e.g., https://yourfrontend.com).
+1. Install Vercel CLI and log in
+
+```bash
+npm i -g vercel
+vercel login
+```
+
+2. Deploy
+
+From the project root, run:
+
+```bash
+vercel
+```
+
+Follow the prompts. Vercel will automatically detect the Python configuration.
+
+3. (Optional) Configure environment variables
+
+If you need to change the default port or CORS origins, you can set them in the Vercel dashboard under Settings > Environment Variables:
+
+· PORT – default 5001 (usually not needed, Vercel assigns its own)
+· HOST – default 0.0.0.0
+· CORS_ORIGINS – comma‑separated list, e.g., https://yourfrontend.com
+
+---
 
 Environment Variables
 
 Variable Description Default
-CORS_ORIGINS Comma‑separated allowed origins for CORS http://localhost:5001,http://127.0.0.1:5001
 PORT Port on which the app runs (used by Gunicorn) 5001
 HOST Host to bind to 0.0.0.0
+CORS_ORIGINS Comma‑separated allowed origins for CORS http://localhost:5001,http://127.0.0.1:5001
+
+All variables are optional. No secrets or API keys are required.
+
+---
 
 API Endpoints
+
+GET /
+
+Returns a simple welcome message.
+
+Response:
+
+```json
+{
+  "code": 200,
+  "message": "Cricket API - Scrapes live data from Cricbuzz"
+}
+```
 
 GET /live-matches
 
@@ -125,7 +213,7 @@ GET /score/live?id=<match_id>
 
 Same data as /score but wrapped in a livescore object, with a success flag.
 
-Response:
+Response (successful):
 
 ```json
 {
@@ -157,12 +245,40 @@ Response:
 }
 ```
 
+Response (failure):
+
+```json
+{
+  "success": "false",
+  "livescore": {}
+}
+```
+
+---
+
+Project Structure
+
+```
+cricket-api/
+├── app/
+│   ├── __init__.py
+│   ├── main.py          # Flask app factory and routes
+│   ├── scraper.py       # Scraping logic (Cricbuzz)
+│   ├── utils.py         # Helper functions (logging, error responses)
+│   └── config.py        # Configuration from environment variables
+├── requirements.txt
+├── vercel.json
+├── Dockerfile
+├── .dockerignore
+├── .gitignore
+├── README.md
+└── docker-compose.yml   (optional, for local development)
+```
+
+---
+
 License
 
 MIT
 
 ```
-
----
-
-This repository is complete and ready to be pushed to GitHub. All files are written with best practices, error handling, and clear documentation. No placeholders remain; the code is functional and can be deployed immediately on Vercel or with Docker
