@@ -1,4 +1,4 @@
-```markdown
+
 # Cricket API – Live Cricket Scores from Cricbuzz
 
 A production‑ready Flask API that scrapes live cricket scores from Cricbuzz.  
