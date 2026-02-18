@@ -56,14 +56,12 @@ Deploy to Vercel
    ```
    Follow the prompts. Vercel will automatically detect the Python environment.
 3. Set the required environment variables in the Vercel dashboard:
-   · SECRET_KEY – a strong secret key.
    · CORS_ORIGINS – comma‑separated list of allowed origins (e.g., https://yourfrontend.com).
    · FLASK_DEBUG – set to false in production.
 
 Environment Variables
 
 Variable Description Default
-SECRET_KEY Flask secret key dev-secret-key-change-in-production
 CORS_ORIGINS Comma‑separated allowed origins for CORS http://localhost:5001,http://127.0.0.1:5001
 FLASK_DEBUG Enable Flask debug mode (true/false) false
 PORT Port on which the app runs (used by Gunicorn) 5001
