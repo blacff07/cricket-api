@@ -37,20 +37,20 @@ git clone https://github.com/yourusername/cricket-api.git
 cd cricket-api
 ```
 
-2. Create a virtual environment
+### 2. Create a virtual environment
 
 ```bash
 python -m venv venv
 source venv/bin/activate      # On Windows: venv\Scripts\activate
 ```
 
-3. Install dependencies
+### 3. Install dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
-4. Run the development server
+### 4. Run the development server
 
 ```bash
 python -m app.main
