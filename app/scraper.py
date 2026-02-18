@@ -1,3 +1,4 @@
+# app/scraper.py
 import re
 import random
 import requests
@@ -164,11 +165,32 @@ def extract_match_data(soup):
             runs_wickets = spans[0].get_text(strip=True)
             overs = spans[1].get_text(strip=True).strip('()')
             livescore = f"{team} {runs_wickets} ({overs})"
+            
+            # Parse runs and wickets
+            runs = 0
+            wickets = 0
+            if '-' in runs_wickets:
+                parts = runs_wickets.split('-')
+                try:
+                    runs = int(parts[0]) if parts[0].isdigit() else 0
+                except (ValueError, IndexError):
+                    runs = 0
+                try:
+                    wickets = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
+                except (ValueError, IndexError):
+                    wickets = 0
+            
+            overs_float = 0
+            try:
+                overs_float = float(overs) if overs else 0
+            except ValueError:
+                overs_float = 0
+                
             current_score = {
                 'team': team,
-                'runs': int(runs_wickets.split('-')[0]) if '-' in runs_wickets else 0,
-                'wickets': int(runs_wickets.split('-')[1]) if '-' in runs_wickets and len(runs_wickets.split('-')) > 1 else 0,
-                'overs': float(overs) if overs else 0
+                'runs': runs,
+                'wickets': wickets,
+                'overs': overs_float
             }
 
     # CRR
@@ -209,15 +231,42 @@ def extract_match_data(soup):
         stat_divs = row.find_all('div', class_=lambda c: c and 'flex justify-center items-center' in c)
         if len(stat_divs) >= 5:
             try:
+                # Parse runs
+                runs = 0
+                if stat_divs[0].text.strip().isdigit():
+                    runs = int(stat_divs[0].text.strip())
+                
+                # Parse balls
+                balls = 0
+                if stat_divs[1].text.strip().isdigit():
+                    balls = int(stat_divs[1].text.strip())
+                
+                # Parse fours
+                fours = 0
+                if stat_divs[2].text.strip().isdigit():
+                    fours = int(stat_divs[2].text.strip())
+                
+                # Parse sixes
+                sixes = 0
+                if stat_divs[3].text.strip().isdigit():
+                    sixes = int(stat_divs[3].text.strip())
+                
+                # Parse strike rate
+                sr = 0.0
+                sr_text = stat_divs[4].text.strip()
+                if sr_text and sr_text.replace('.', '').isdigit():
+                    sr = float(sr_text)
+                
                 batsmen.append({
                     'name': name,
-                    'runs': int(stat_divs[0].text.strip()) if stat_divs[0].text.strip().isdigit() else 0,
-                    'balls': int(stat_divs[1].text.strip()) if stat_divs[1].text.strip().isdigit() else 0,
-                    'fours': int(stat_divs[2].text.strip()) if stat_divs[2].text.strip().isdigit() else 0,
-                    'sixes': int(stat_divs[3].text.strip()) if stat_divs[3].text.strip().isdigit() else 0,
-                    'sr': float(stat_divs[4].text.strip()) if stat_divs[4].text.strip().replace('.', '').isdigit() else 0
+                    'runs': runs,
+                    'balls': balls,
+                    'fours': fours,
+                    'sixes': sixes,
+                    'sr': sr
                 })
-            except (ValueError, IndexError):
+            except (ValueError, IndexError) as e:
+                logger.debug(f"Error parsing batsman {name}: {e}")
                 continue
 
     # Bowlers
@@ -234,15 +283,43 @@ def extract_match_data(soup):
             stat_divs = row.find_all('div', class_=lambda c: c and 'flex justify-center items-center' in c)
             if len(stat_divs) >= 5:
                 try:
+                    # Parse overs
+                    overs = 0.0
+                    overs_text = stat_divs[0].text.strip()
+                    if overs_text and overs_text.replace('.', '').isdigit():
+                        overs = float(overs_text)
+                    
+                    # Parse maidens
+                    maidens = 0
+                    if stat_divs[1].text.strip().isdigit():
+                        maidens = int(stat_divs[1].text.strip())
+                    
+                    # Parse runs
+                    runs = 0
+                    if stat_divs[2].text.strip().isdigit():
+                        runs = int(stat_divs[2].text.strip())
+                    
+                    # Parse wickets
+                    wickets = 0
+                    if stat_divs[3].text.strip().isdigit():
+                        wickets = int(stat_divs[3].text.strip())
+                    
+                    # Parse economy
+                    econ = 0.0
+                    econ_text = stat_divs[4].text.strip()
+                    if econ_text and econ_text.replace('.', '').isdigit():
+                        econ = float(econ_text)
+                    
                     bowlers.append({
                         'name': name,
-                        'overs': float(stat_divs[0].text.strip()) if stat_divs[0].text.strip().replace('.', '').isdigit() else 0,
-                        'maidens': int(stat_divs[1].text.strip()) if stat_divs[1].text.strip().isdigit() else 0,
-                        'runs': int(stat_divs[2].text.strip()) if stat_divs[2].text.strip().isdigit() else 0,
-                        'wickets': int(stat_divs[3].text.strip()) if stat_divs[3].text.strip().isdigit() else 0,
-                        'econ': float(stat_divs[4].text.strip()) if stat_divs[4].text.strip().replace('.', '').isdigit() else 0
+                        'overs': overs,
+                        'maidens': maidens,
+                        'runs': runs,
+                        'wickets': wickets,
+                        'econ': econ
                     })
-                except (ValueError, IndexError):
+                except (ValueError, IndexError) as e:
+                    logger.debug(f"Error parsing bowler {name}: {e}")
                     continue
 
     return {
