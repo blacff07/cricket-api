@@ -66,21 +66,21 @@ PORT=8080 python -m app.main
 
 ---
 
-Running with Docker
+### Running with Docker
 
-Build the image
+## Build the image
 
 ```bash
 docker build -t cricket-api .
 ```
 
-Run the container
+## Run the container
 
 ```bash
 docker run -p 5001:5001 cricket-api
 ```
 
-Or use Docker Compose
+## Or use Docker Compose
 
 ```bash
 docker-compose up
@@ -90,9 +90,9 @@ The API will be available at http://localhost:5001
 
 ---
 
-Deploy to Vercel
+### Deploy to Vercel
 
-Step 1: Push your code to GitHub
+## Step 1: Push your code to GitHub
 
 Create a repository on GitHub and push your code:
 
@@ -105,7 +105,7 @@ git remote add origin https://github.com/yourusername/cricket-api.git
 git push -u origin main
 ```
 
-Step 2: Import your project on Vercel
+## Step 2: Import your project on Vercel
 
 1. Go to vercel.com
 2. Click "Add New..." → "Project"
@@ -113,21 +113,21 @@ Step 2: Import your project on Vercel
 4. Vercel will automatically detect the Python configuration
 5. Click "Deploy"
 
-Step 3: Configure environment variables (optional)
+## Step 3: Configure environment variables (optional)
 
 If you need to change defaults, go to your project dashboard → Settings → Environment Variables and add:
 
 Name Value Description
 CORS_ORIGINS https://yourdomain.com Comma‑separated allowed origins
 
-Step 4: Deploy
+## Step 4: Deploy
 
 Vercel automatically deploys when you push to the main branch.
 Your API will be available at https://cricket-api.vercel.app
 
 ---
 
-Environment Variables
+## Environment Variables
 
 Variable Default Description
 PORT 5001 Port for the app (set by Vercel automatically)
@@ -138,9 +138,9 @@ All variables are optional. No API keys required.
 
 ---
 
-API Endpoints
+### API Endpoints
 
-GET /
+## GET /
 
 ```json
 {
@@ -149,7 +149,7 @@ GET /
 }
 ```
 
-GET /live-matches
+## GET /live-matches
 
 ```json
 {
@@ -164,7 +164,7 @@ GET /live-matches
 }
 ```
 
-GET /score?id=139252
+## GET /score?id=139252
 
 ```json
 {
@@ -193,7 +193,7 @@ GET /score?id=139252
 }
 ```
 
-GET /score/live?id=139252
+## GET /score/live?id=139252
 
 ```json
 {
@@ -227,7 +227,7 @@ GET /score/live?id=139252
 
 ---
 
-Project Structure
+### Project Structure
 
 ```
 cricket-api/
@@ -248,21 +248,21 @@ cricket-api/
 
 ---
 
-Testing the API
+### Testing the API
 
-Get live matches
+## Get live matches
 
 ```bash
 curl https://your-app.vercel.app/live-matches
 ```
 
-Get score for a match
+## Get score for a match
 
 ```bash
 curl https://your-app.vercel.app/score?id=139252
 ```
 
-Get formatted live score
+## Get formatted live score
 
 ```bash
 curl https://your-app.vercel.app/score/live?id=139252
@@ -270,9 +270,9 @@ curl https://your-app.vercel.app/score/live?id=139252
 
 ---
 
-Troubleshooting
+### Troubleshooting
 
-Common Vercel deployment issues
+## Common Vercel deployment issues
 
 Issue Solution
 "Module not found" Ensure requirements.txt includes all dependencies
@@ -280,7 +280,7 @@ Import errors Use relative imports (from .module import ...)
 Timeout Increase timeout in config.py (default 10s)
 CORS errors Set CORS_ORIGINS environment variable
 
-Local development issues
+## Local development issues
 
 Issue Solution
 ImportError Run with python -m app.main not python app/main.py
@@ -289,25 +289,23 @@ Missing logger Ensure import logging in all files that use logger
 
 ---
 
-License
+### License
 
 MIT
 
 ---
 
-Author
+### Author
 
 Blac
 
 ---
 
-Support
+### Support
 
 For issues or questions, please open an issue on GitHub.
 
-```
-
-## Vercel Hosting Steps (Plain Text)
+## Vercel Hosting Steps
 
 1. **Push code to GitHub**
    ```bash
