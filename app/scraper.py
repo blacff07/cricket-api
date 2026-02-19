@@ -395,22 +395,26 @@ def extract_match_data(soup):
     }
 
 def extract_match_status_from_match_page(soup):
-    """
-    Extract the true match status from a match page.
-    Returns a short, human-readable string like "Live", "Canada opt to bowl",
-    "ZIM won", or "Innings Break".
-    """
+    """Extract the true match status from a match page."""
 
-    # ---- Helper to clean and validate text ----
+    # ----- Helper to reject invalid status strings -----
     def is_valid_status(text):
-        if not text or len(text) > 100:
+        if not text or len(text) > 60:          # Status is always short
             return False
-        # Reject anything that looks like code or contains script markers
-        bad_patterns = ['{', '}', '__next', 'function', '=>', 'React', 'javascript']
-        if any(p in text for p in bad_patterns):
-            return False
-        # Should contain at least one word character
-        return bool(re.search(r'\w', text))
+        # Reject anything that looks like commentary or nav menu
+        bad_patterns = [
+            'short ball', 'full toss', 'driven', 'pulled', 'cut', 'swept',
+            'over mid-wicket', 'long on', 'long off', 'covers', 'point',
+            'Schedule', 'Archives', 'Rankings', 'Videos', 'More'
+        ]
+        lower_text = text.lower()
+        for pattern in bad_patterns:
+            if pattern in lower_text:
+                return False
+        # Must contain at least one status-like word
+        status_keywords = ['won', 'live', 'stumps', 'innings', 'rain', 
+                          'abandoned', 'opt', 'target', 'need', 'required']
+        return any(kw in lower_text for kw in status_keywords)
 
     # 1️⃣ Most reliable: the live badge
     live_badge = soup.find('span', class_=lambda c: c and 'cb-plus-live-tag' in c)
@@ -424,21 +428,21 @@ def extract_match_status_from_match_page(soup):
         if is_valid_status(candidate):
             return candidate
 
-    # 3️⃣ Look for toss/opt text (e.g., "Canada opt to bowl")
+    # 3️⃣ Look for toss/opt text
     toss_elem = soup.find('div', string=re.compile(r'opt to (bat|field)', re.I))
     if toss_elem:
         candidate = toss_elem.get_text(strip=True)
         if is_valid_status(candidate):
             return candidate
 
-    # 4️⃣ Look for result text (e.g., "Team won by X runs/wickets")
+    # 4️⃣ Look for result text
     result_elem = soup.find('div', string=re.compile(r'won by \d+ (run|wicket)', re.I))
     if result_elem:
         candidate = result_elem.get_text(strip=True)
         if is_valid_status(candidate):
             return candidate
 
-    # 5️⃣ Look for innings break / stumps / rain / abandoned
+    # 5️⃣ Look for innings break / stumps / rain
     status_keywords = ['innings break', 'stumps', 'rain', 'abandoned', 'lunch', 'tea']
     for kw in status_keywords:
         elem = soup.find('div', string=re.compile(kw, re.I))
@@ -452,23 +456,14 @@ def extract_match_status_from_match_page(soup):
     if preview_div:
         return "Preview"
 
-    # 7️⃣ Fallback – scan all <div> and <span> but be extremely strict
-    for elem in soup.find_all(['div', 'span']):
-        # Skip script and style tags entirely
-        if elem.name in ('script', 'style'):
-            continue
-        # Skip elements that are likely part of the navigation or header
-        if elem.find_parent('nav') or elem.find_parent('header'):
-            continue
-        text = elem.get_text(strip=True)
-        if not is_valid_status(text):
-            continue
-        # Check if the text contains any status-related keyword
-        lower_text = text.lower()
-        if any(kw in lower_text for kw in ['won', 'live', 'stumps', 'innings', 'rain', 'abandoned', 'opt', 'target', 'need']):
-            return text
+    # 7️⃣ Fallback – scan only elements in the match header area
+    header = soup.find('div', class_=lambda c: c and 'cb-col-100' in c and 'cb-miniscroll' in c)
+    if header:
+        for elem in header.find_all(['div', 'span']):
+            text = elem.get_text(strip=True)
+            if is_valid_status(text):
+                return text
 
-    # Nothing found
     return None
 
 def extract_start_time_from_match_page(soup):
