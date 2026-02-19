@@ -115,6 +115,23 @@ def detect_match_state(soup):
     
     return "unknown"
 
+def extract_start_time_from_match_page(soup):
+    """Extract only the start time from a match page (lighter version)."""
+    start_time = None
+    # Look for the Date & Time label
+    date_time_span = soup.find('span', string=re.compile(r'Date & Time:', re.I))
+    if date_time_span:
+        parent = date_time_span.find_parent()
+        if parent:
+            full_text = parent.get_text(strip=True)
+            start_time = full_text.replace('Date & Time:', '').strip()
+    if not start_time:
+        # Fallback: look for any element containing a time pattern
+        time_elem = soup.find(string=re.compile(r'\d{1,2}:\d{2}\s*(AM|PM)', re.I))
+        if time_elem:
+            start_time = time_elem.strip()
+    return start_time
+
 def extract_match_data(soup):
     """Extract detailed match data from a match page."""
     # Title
