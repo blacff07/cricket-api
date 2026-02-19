@@ -1,28 +1,21 @@
-# Byte-compiled / optimized / DLL files
 __pycache__/
 *.pyc
-
-# Environments
-.env
-venv/
+*.pyo
+*.pyd
+.Python
 env/
+venv/
 ENV/
 env.bak/
 venv.bak/
-
-# IDE
-.vscode/
-.idea/
-
-# Logs
 *.log
-
-# Docker
-docker-compose.override.yml
-
-# Vercel
-.vercel
-
-# OS files
+*.pot
+*.py[cod]
 .DS_Store
-Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+dist/
+build/
+*.egg-info/
