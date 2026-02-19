@@ -397,30 +397,31 @@ def extract_match_data(soup):
 def extract_match_status_from_match_page(soup):
     """Extract the true match status from a match page."""
 
-    # 1️⃣ Completed matches (look for team‑won text)
-    result_text = soup.find(string=re.compile(r'won by \d+ (run|wicket)', re.I))
-    if result_text:
-        full = result_text.strip()
-        # Clean up extra whitespace
-        return ' '.join(full.split())
-
-    # 2️⃣ Check for "live" badge (most reliable for live matches)
+    # 1️⃣ Look for the most reliable indicator: the live badge (returns "Live")
     live_badge = soup.find('span', class_=lambda c: c and 'cb-plus-live-tag' in c)
     if live_badge:
         return "Live"
 
-    # 3️⃣ Innings break (match is live but between innings)
-    innings = soup.find('div', string=re.compile(r'innings break', re.I))
-    if innings:
-        return "Innings Break"
+    # 2️⃣ Look for the main status div (often contains 'cb-text-*' class)
+    status_div = soup.find('div', class_=lambda c: c and 'cb-text-' in c)
+    if status_div:
+        candidate = status_div.text.strip()
+        # Validate: short, no HTML tags, not a script
+        if candidate and len(candidate) < 50 and not candidate.startswith('<'):
+            return candidate
 
-    # 4️⃣ Toss / Opt status (match is about to start / just started)
-    toss = soup.find('div', string=re.compile(r'opt to (bat|field)', re.I))
-    if toss:
-        return toss.text.strip()
+    # 3️⃣ Look for toss/innings info near the top
+    toss_elem = soup.find('div', string=re.compile(r'opt to (bat|field)', re.I))
+    if toss_elem:
+        return toss_elem.text.strip()
 
-    # 5️⃣ Stumps / Rain / Abandoned
-    status_keywords = ['stumps', 'rain', 'abandoned', 'drawn', 'lunch', 'tea']
+    # 4️⃣ Look for result text (e.g., "Team won by X wickets")
+    result_text = soup.find(string=re.compile(r'won by \d+ (run|wicket)', re.I))
+    if result_text:
+        return result_text.strip()
+
+    # 5️⃣ Innings break / Stumps / Rain
+    status_keywords = ['innings break', 'stumps', 'rain', 'abandoned', 'lunch', 'tea']
     for kw in status_keywords:
         elem = soup.find(string=re.compile(kw, re.I))
         if elem:
@@ -431,17 +432,15 @@ def extract_match_status_from_match_page(soup):
     if preview:
         return "Preview"
 
-    # 7️⃣ Fallback – look for any small status text
+    # 7️⃣ Very specific fallback: find any small div with a short status-like text
     status_elements = soup.find_all(['div', 'span'], string=re.compile(
-        r'(won|live|stumps|innings break|rain|abandoned|opt to bat|opt to field|target|need|required|overnight)',
+        r'^(won|live|stumps|innings break|rain|abandoned|opt to bat|opt to field|target|need)',
         re.I
     ))
     for elem in status_elements:
-        if elem.text and len(elem.text.strip()) < 50:
-            candidate = elem.text.strip()
-            # Avoid picking up team names
-            if not any(team in candidate for team in ['IND', 'PAK', 'AUS', 'ENG', 'NZ', 'SA', 'SL', 'WI', 'AFG', 'BAN', 'ZIM']):
-                return candidate
+        text = elem.text.strip()
+        if text and len(text) < 50 and not text.startswith('<') and not 'function' in text:
+            return text
 
     return None
 
