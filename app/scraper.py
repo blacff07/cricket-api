@@ -349,12 +349,28 @@ def extract_match_data(soup):
                     logger.debug(f"Error parsing bowler {name}: {e}")
                     continue
 
+    # Start time
+    start_time = None
+    # Look for the Date & Time label
+    date_time_span = soup.find('span', string=re.compile(r'Date & Time:', re.I))
+    if date_time_span:
+        parent = date_time_span.find_parent()
+        if parent:
+            full_text = parent.get_text(strip=True)
+            start_time = full_text.replace('Date & Time:', '').strip()
+    else:
+        # Fallback: look for any element containing a time pattern
+        time_elem = soup.find(string=re.compile(r'\d{1,2}:\d{2}\s*(AM|PM)', re.I))
+        if time_elem:
+            start_time = time_elem.strip()
+
     return {
         'title': title,
         'series': series,
         'teams': teams,
         'status': status,
         'match_state': match_state,
+        'start_time': start_time,
         'current_score': current_score,
         'livescore': livescore,
         'run_rate': runrate,
