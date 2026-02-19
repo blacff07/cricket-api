@@ -97,16 +97,7 @@ All errors return a consistent JSON structure:
 License
 
 MIT – feel free to use and modify.
-
 ```
-
----
-
-### `LICENSE`
-
-```text
-MIT License
-
 Copyright (c) 2026
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
