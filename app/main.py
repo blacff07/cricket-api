@@ -1,21 +1,14 @@
 # app/main.py
 import logging
 import time
-from functools import wraps, lru_cache
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from functools import wraps
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from markupsafe import escape
 
 from .config import Config
 from .utils import setup_logging, success_response, error_response, json_error_response
-from .scraper import (
-    fetch_page,
-    extract_live_matches,
-    extract_match_data,
-    extract_start_time_from_match_page,
-    extract_match_status_from_match_page
-)
+from .scraper import fetch_page, extract_live_matches, extract_match_data
 
 # Setup logging
 setup_logging()
@@ -37,48 +30,6 @@ def cache_ttl(seconds=Config.CACHE_TTL):
             return result
         return wrapper
     return decorator
-
-# Cache for match extra details (start time and status) – TTL 5 minutes
-@lru_cache(maxsize=128)
-def get_cached_match_extra(match_id):
-    """Fetch start time and status for a match and cache them."""
-    url = f"{Config.CRICBUZZ_URL}/live-cricket-scores/{match_id}"
-    soup, error = fetch_page(url)
-    if soup is None:
-        logger.warning(f"Failed to fetch match page for {match_id}: {error}")
-        return None, None
-    start_time = extract_start_time_from_match_page(soup)
-    status = extract_match_status_from_match_page(soup)
-    return start_time, status
-
-def enrich_matches_with_details(matches):
-    """Fetch start times and true status for all matches concurrently."""
-    match_ids = [m['id'] for m in matches]
-    start_times = {}
-    true_statuses = {}
-
-    with ThreadPoolExecutor(max_workers=5) as executor:
-        future_to_id = {executor.submit(get_cached_match_extra, mid): mid for mid in match_ids}
-        for future in as_completed(future_to_id):
-            mid = future_to_id[future]
-            try:
-                start_time, status = future.result()
-                start_times[mid] = start_time
-                true_statuses[mid] = status
-            except Exception as e:
-                logger.error(f"Error fetching details for match {mid}: {e}")
-                start_times[mid] = None
-                true_statuses[mid] = None
-
-    enriched = []
-    for m in matches:
-        m['start_time'] = start_times.get(m['id'])
-        # Override status with true status if available
-        true_status = true_statuses.get(m['id'])
-        if true_status:
-            m['status'] = true_status
-        enriched.append(m)
-    return enriched
 
 def create_app():
     """Application factory."""
@@ -118,7 +69,7 @@ def create_app():
     @app.route('/api/v1/live-matches', methods=['GET'])
     @cache_ttl(15)
     def v1_live_matches():
-        """Return all currently live matches with start times and true status."""
+        """Return all currently live matches."""
         url = f"{Config.CRICBUZZ_URL}/"
         soup, error = fetch_page(url)
         if soup is None:
@@ -128,10 +79,9 @@ def create_app():
                 return error_response(503, 'SERVICE_UNAVAILABLE', 'Cannot connect to Cricbuzz')
             else:
                 return error_response(500, 'SCRAPER_FAILED', 'Failed to fetch live matches')
-
+        
         matches = extract_live_matches(soup)
-        enriched_matches = enrich_matches_with_details(matches)
-        return success_response({'matches': enriched_matches})
+        return success_response({'matches': matches})
 
     @app.route('/api/v1/matches/<int:match_id>/live', methods=['GET'])
     @cache_ttl(5)
@@ -208,11 +158,7 @@ def create_app():
     def live_matches_legacy():
         data = v1_live_matches().get_json()
         if data.get('success'):
-            # Strip extra fields for legacy endpoint
-            matches = data['data']['matches']
-            for m in matches:
-                m.pop('start_time', None)
-            return jsonify({'matches': matches})
+            return jsonify({'matches': data['data']['matches']})
         return jsonify({'matches': []})
 
     @app.route('/score', methods=['GET'])
