@@ -155,6 +155,47 @@ def create_app():
             'bowling': data['bowling'][:2]  # Only current bowlers
         })
 
+# Cache for start times and status (TTL 5 minutes = 300 seconds)
+@lru_cache(maxsize=128)
+def get_cached_match_extra(match_id):
+    """Fetch start time and status for a match and cache them."""
+    url = f"{Config.CRICBUZZ_URL}/live-cricket-scores/{match_id}"
+    soup, error = fetch_page(url)
+    if soup is None:
+        return None, None
+    start_time = extract_start_time_from_match_page(soup)
+    status = extract_match_status_from_match_page(soup)
+    return start_time, status
+
+def enrich_matches_with_details(matches):
+    """Fetch start times and true status for all matches concurrently."""
+    match_ids = [m['id'] for m in matches]
+    start_times = {}
+    true_statuses = {}
+    
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        future_to_id = {executor.submit(get_cached_match_extra, mid): mid for mid in match_ids}
+        for future in as_completed(future_to_id):
+            mid = future_to_id[future]
+            try:
+                start_time, status = future.result()
+                start_times[mid] = start_time
+                true_statuses[mid] = status
+            except Exception as e:
+                logger.error(f"Error fetching details for match {mid}: {e}")
+                start_times[mid] = None
+                true_statuses[mid] = None
+    
+    enriched = []
+    for m in matches:
+        m['start_time'] = start_times.get(m['id'])
+        # Override status with true status if available
+        true_status = true_statuses.get(m['id'])
+        if true_status:
+            m['status'] = true_status
+        enriched.append(m)
+    return enriched
+
     @app.route('/api/v1/matches/<int:match_id>/score', methods=['GET'])
     @cache_ttl(5)
     def v1_match_score(match_id):
