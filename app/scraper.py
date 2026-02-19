@@ -394,6 +394,39 @@ def extract_match_data(soup):
         'bowling': bowlers
     }
 
+def extract_match_status_from_match_page(soup):
+    """Extract only the match status from a match page (lighter version)."""
+    # Try the same logic as in extract_match_data but stop after status.
+    # Method 1: Look for the match status in the main header or score area
+    status_elements = soup.find_all(['div', 'span'], string=re.compile(r'(won|live|stumps|innings break|rain|abandoned|opt to bat|opt to field|target|need|required|overnight)', re.I))
+    for elem in status_elements:
+        if elem.text and len(elem.text.strip()) < 50:
+            possible_status = elem.text.strip()
+            if any(keyword in possible_status.lower() for keyword in ['won', 'live', 'stumps', 'innings', 'rain', 'abandoned', 'opt', 'target', 'need', 'required', 'overnight']):
+                return possible_status
+    
+    # Method 2: Try the match bar
+    match_bar = soup.find('div', class_=lambda c: c and 'bg-[#4a4a4a]' in c)
+    if match_bar:
+        match_links = match_bar.find_all('a', title=True)
+        for link in match_links[:3]:
+            title_attr = link.get('title', '')
+            if ' vs ' in title_attr:
+                parts = title_attr.split('-')
+                if len(parts) > 1:
+                    candidate = parts[-1].strip()
+                    if not any(team in candidate for team in ['IND', 'PAK', 'AUS', 'ENG', 'NZ', 'SA', 'SL', 'WI', 'AFG', 'BAN', 'ZIM']):
+                        return candidate
+    
+    # Method 3: Look for cb-text-* class
+    status_div = soup.find('div', class_=lambda c: c and 'cb-text-' in c)
+    if status_div:
+        candidate = status_div.text.strip()
+        if not any(team in candidate for team in ['IND', 'PAK', 'AUS', 'ENG', 'NZ', 'SA', 'SL', 'WI', 'AFG', 'BAN', 'ZIM']):
+            return candidate
+    
+    return None
+
 def extract_start_time_from_match_page(soup):
     """Extract only the start time from a match page (lighter version)."""
     start_time = None
