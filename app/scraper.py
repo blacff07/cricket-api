@@ -8,11 +8,9 @@ from .config import Config
 logger = logging.getLogger(__name__)
 
 def get_random_agent():
-    """Return a random user agent from the configuration list."""
     return random.choice(Config.USER_AGENTS)
 
 def fetch_page(url):
-    """Fetch a page from Cricbuzz and return a BeautifulSoup object."""
     headers = {
         'User-Agent': get_random_agent(),
         'Cache-Control': 'no-cache'
@@ -33,8 +31,7 @@ def fetch_page(url):
     except Exception as e:
         logger.error(f"Unexpected error fetching {url}: {e}")
         return None, "unknown"
-
-# ----------------------------------------------------------------------
+ ----------------------------------------------------------------------
 # Live matches list extraction (from homepage)
 # ----------------------------------------------------------------------
 def extract_live_matches(soup):
