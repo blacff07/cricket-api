@@ -1,7 +1,7 @@
+# app/main.py
 import logging
 import time
 from functools import wraps
-from functools import lru_cache
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from markupsafe import escape
@@ -111,6 +111,7 @@ def create_app():
             'teams': data['teams'],
             'status': data['status'],
             'match_state': data['match_state'],
+            'start_time': data['start_time'],
             'current_score': data['current_score'],
             'run_rate': data['run_rate'],
             'batting': data['batting'],
@@ -145,6 +146,7 @@ def create_app():
             'teams': data['teams'],
             'status': data['status'],
             'match_state': data['match_state'],
+            'start_time': data['start_time'],
             'current_score': data['current_score'],
             'run_rate': data['run_rate'],
             'batting': data['batting'],
