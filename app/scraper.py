@@ -395,36 +395,54 @@ def extract_match_data(soup):
     }
 
 def extract_match_status_from_match_page(soup):
-    """Extract only the match status from a match page (lighter version)."""
-    # Try the same logic as in extract_match_data but stop after status.
-    # Method 1: Look for the match status in the main header or score area
-    status_elements = soup.find_all(['div', 'span'], string=re.compile(r'(won|live|stumps|innings break|rain|abandoned|opt to bat|opt to field|target|need|required|overnight)', re.I))
+    """Extract the true match status from a match page."""
+
+    # 1️⃣ Completed matches (look for team‑won text)
+    result_text = soup.find(string=re.compile(r'won by \d+ (run|wicket)', re.I))
+    if result_text:
+        full = result_text.strip()
+        # Clean up extra whitespace
+        return ' '.join(full.split())
+
+    # 2️⃣ Check for "live" badge (most reliable for live matches)
+    live_badge = soup.find('span', class_=lambda c: c and 'cb-plus-live-tag' in c)
+    if live_badge:
+        return "Live"
+
+    # 3️⃣ Innings break (match is live but between innings)
+    innings = soup.find('div', string=re.compile(r'innings break', re.I))
+    if innings:
+        return "Innings Break"
+
+    # 4️⃣ Toss / Opt status (match is about to start / just started)
+    toss = soup.find('div', string=re.compile(r'opt to (bat|field)', re.I))
+    if toss:
+        return toss.text.strip()
+
+    # 5️⃣ Stumps / Rain / Abandoned
+    status_keywords = ['stumps', 'rain', 'abandoned', 'drawn', 'lunch', 'tea']
+    for kw in status_keywords:
+        elem = soup.find(string=re.compile(kw, re.I))
+        if elem:
+            return elem.text.strip()
+
+    # 6️⃣ Preview (match not started)
+    preview = soup.find('div', class_=lambda c: c and 'cb-text-preview' in c)
+    if preview:
+        return "Preview"
+
+    # 7️⃣ Fallback – look for any small status text
+    status_elements = soup.find_all(['div', 'span'], string=re.compile(
+        r'(won|live|stumps|innings break|rain|abandoned|opt to bat|opt to field|target|need|required|overnight)',
+        re.I
+    ))
     for elem in status_elements:
         if elem.text and len(elem.text.strip()) < 50:
-            possible_status = elem.text.strip()
-            if any(keyword in possible_status.lower() for keyword in ['won', 'live', 'stumps', 'innings', 'rain', 'abandoned', 'opt', 'target', 'need', 'required', 'overnight']):
-                return possible_status
-    
-    # Method 2: Try the match bar
-    match_bar = soup.find('div', class_=lambda c: c and 'bg-[#4a4a4a]' in c)
-    if match_bar:
-        match_links = match_bar.find_all('a', title=True)
-        for link in match_links[:3]:
-            title_attr = link.get('title', '')
-            if ' vs ' in title_attr:
-                parts = title_attr.split('-')
-                if len(parts) > 1:
-                    candidate = parts[-1].strip()
-                    if not any(team in candidate for team in ['IND', 'PAK', 'AUS', 'ENG', 'NZ', 'SA', 'SL', 'WI', 'AFG', 'BAN', 'ZIM']):
-                        return candidate
-    
-    # Method 3: Look for cb-text-* class
-    status_div = soup.find('div', class_=lambda c: c and 'cb-text-' in c)
-    if status_div:
-        candidate = status_div.text.strip()
-        if not any(team in candidate for team in ['IND', 'PAK', 'AUS', 'ENG', 'NZ', 'SA', 'SL', 'WI', 'AFG', 'BAN', 'ZIM']):
-            return candidate
-    
+            candidate = elem.text.strip()
+            # Avoid picking up team names
+            if not any(team in candidate for team in ['IND', 'PAK', 'AUS', 'ENG', 'NZ', 'SA', 'SL', 'WI', 'AFG', 'BAN', 'ZIM']):
+                return candidate
+
     return None
 
 def extract_start_time_from_match_page(soup):
