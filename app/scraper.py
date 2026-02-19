@@ -395,9 +395,24 @@ def extract_match_data(soup):
     }
 
 def extract_match_status_from_match_page(soup):
-    """Extract the true match status from a match page."""
+    """
+    Extract the true match status from a match page.
+    Returns a short, human-readable string like "Live", "Canada opt to bowl",
+    "ZIM won", or "Innings Break".
+    """
 
-    # 1️⃣ Most reliable: the live badge (returns "Live")
+    # ---- Helper to clean and validate text ----
+    def is_valid_status(text):
+        if not text or len(text) > 100:
+            return False
+        # Reject anything that looks like code or contains script markers
+        bad_patterns = ['{', '}', '__next', 'function', '=>', 'React', 'javascript']
+        if any(p in text for p in bad_patterns):
+            return False
+        # Should contain at least one word character
+        return bool(re.search(r'\w', text))
+
+    # 1️⃣ Most reliable: the live badge
     live_badge = soup.find('span', class_=lambda c: c and 'cb-plus-live-tag' in c)
     if live_badge:
         return "Live"
@@ -406,40 +421,49 @@ def extract_match_status_from_match_page(soup):
     status_div = soup.find('div', class_=lambda c: c and 'cb-text-' in c)
     if status_div:
         candidate = status_div.get_text(strip=True)
-        if candidate and len(candidate) < 50:
+        if is_valid_status(candidate):
             return candidate
 
     # 3️⃣ Look for toss/opt text (e.g., "Canada opt to bowl")
     toss_elem = soup.find('div', string=re.compile(r'opt to (bat|field)', re.I))
     if toss_elem:
-        return toss_elem.get_text(strip=True)
+        candidate = toss_elem.get_text(strip=True)
+        if is_valid_status(candidate):
+            return candidate
 
     # 4️⃣ Look for result text (e.g., "Team won by X runs/wickets")
     result_elem = soup.find('div', string=re.compile(r'won by \d+ (run|wicket)', re.I))
     if result_elem:
-        return result_elem.get_text(strip=True)
+        candidate = result_elem.get_text(strip=True)
+        if is_valid_status(candidate):
+            return candidate
 
     # 5️⃣ Look for innings break / stumps / rain / abandoned
     status_keywords = ['innings break', 'stumps', 'rain', 'abandoned', 'lunch', 'tea']
     for kw in status_keywords:
         elem = soup.find('div', string=re.compile(kw, re.I))
         if elem:
-            return elem.get_text(strip=True)
+            candidate = elem.get_text(strip=True)
+            if is_valid_status(candidate):
+                return candidate
 
     # 6️⃣ Preview (match not started)
     preview_div = soup.find('div', class_=lambda c: c and 'cb-text-preview' in c)
     if preview_div:
         return "Preview"
 
-    # 7️⃣ Fallback – only look at <div> or <span> with very short text
+    # 7️⃣ Fallback – scan all <div> and <span> but be extremely strict
     for elem in soup.find_all(['div', 'span']):
-        # Skip any element that is likely a script or style container
-        if elem.name == 'script':
+        # Skip script and style tags entirely
+        if elem.name in ('script', 'style'):
+            continue
+        # Skip elements that are likely part of the navigation or header
+        if elem.find_parent('nav') or elem.find_parent('header'):
             continue
         text = elem.get_text(strip=True)
-        if not text or len(text) > 60:
+        if not is_valid_status(text):
             continue
-        # Check if the text contains any status keyword
+        # Check if the text contains any status-related keyword
         lower_text = text.lower()
         if any(kw in lower_text for kw in ['won', 'live', 'stumps', 'innings', 'rain', 'abandoned', 'opt', 'target', 'need']):
             return text
