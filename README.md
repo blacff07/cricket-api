@@ -330,3 +330,6 @@ For issues or questions, please open an issue on GitHub.
    ```
 
 No environment variables needed. Just works.
+
+## Timezone:
+The start_time field returns the match start time in the local time of the venue, as provided by Cricbuzz (e.g., "Today, 7:00 PM LOCAL"). The API does not perform any timezone conversion. If you need UTC or a specific timezone, you must parse the string and apply the appropriate offset based on the match location.
