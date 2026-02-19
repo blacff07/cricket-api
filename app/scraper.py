@@ -402,46 +402,49 @@ def extract_match_status_from_match_page(soup):
     if live_badge:
         return "Live"
 
-    # 2️⃣ Look for the main status div (often contains 'cb-text-' class)
+    # 2️⃣ Look for the main status div (often has 'cb-text-' class)
     status_div = soup.find('div', class_=lambda c: c and 'cb-text-' in c)
     if status_div:
-        candidate = status_div.text.strip()
+        candidate = status_div.get_text(strip=True)
         if candidate and len(candidate) < 50:
             return candidate
 
-    # 3️⃣ Look for toss/opt text
+    # 3️⃣ Look for toss/opt text (e.g., "Canada opt to bowl")
     toss_elem = soup.find('div', string=re.compile(r'opt to (bat|field)', re.I))
     if toss_elem:
-        return toss_elem.text.strip()
+        return toss_elem.get_text(strip=True)
 
-    # 4️⃣ Look for result text (e.g., "Team won by X runs")
-    result = soup.find('div', string=re.compile(r'won by \d+ (run|wicket)', re.I))
-    if result:
-        return result.text.strip()
+    # 4️⃣ Look for result text (e.g., "Team won by X runs/wickets")
+    result_elem = soup.find('div', string=re.compile(r'won by \d+ (run|wicket)', re.I))
+    if result_elem:
+        return result_elem.get_text(strip=True)
 
-    # 5️⃣ Look for innings break / stumps / rain
+    # 5️⃣ Look for innings break / stumps / rain / abandoned
     status_keywords = ['innings break', 'stumps', 'rain', 'abandoned', 'lunch', 'tea']
     for kw in status_keywords:
         elem = soup.find('div', string=re.compile(kw, re.I))
         if elem:
-            return elem.text.strip()
+            return elem.get_text(strip=True)
 
-    # 6️⃣ Preview
-    preview = soup.find('div', class_=lambda c: c and 'cb-text-preview' in c)
-    if preview:
+    # 6️⃣ Preview (match not started)
+    preview_div = soup.find('div', class_=lambda c: c and 'cb-text-preview' in c)
+    if preview_div:
         return "Preview"
 
-    # 7️⃣ Fallback – look for ANY small div/span with status-like text
-    # But EXCLUDE script tags and large blocks
+    # 7️⃣ Fallback – only look at <div> or <span> with very short text
     for elem in soup.find_all(['div', 'span']):
+        # Skip any element that is likely a script or style container
         if elem.name == 'script':
-            continue  # Skip script tags entirely
+            continue
         text = elem.get_text(strip=True)
-        if not text or len(text) > 100:
-            continue  # Skip empty or very long text
-        if any(kw in text.lower() for kw in ['won', 'live', 'stumps', 'innings', 'rain', 'abandoned', 'opt', 'target']):
+        if not text or len(text) > 60:
+            continue
+        # Check if the text contains any status keyword
+        lower_text = text.lower()
+        if any(kw in lower_text for kw in ['won', 'live', 'stumps', 'innings', 'rain', 'abandoned', 'opt', 'target', 'need']):
             return text
 
+    # Nothing found
     return None
 
 def extract_start_time_from_match_page(soup):
