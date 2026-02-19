@@ -402,12 +402,12 @@ def extract_match_status_from_match_page(soup):
     if live_badge:
         return "Live"
 
-    # 2️⃣ Look for the main status div (often contains 'cb-text-*' class)
+    # 2️⃣ Look for the main status div (often contains 'cb-text-' class)
     status_div = soup.find('div', class_=lambda c: c and 'cb-text-' in c)
     if status_div:
         candidate = status_div.text.strip()
         # Validate: short, no HTML tags, not a script
-        if candidate and len(candidate) < 50 and not candidate.startswith('<'):
+        if candidate and len(candidate) < 50 and not candidate.startswith('<') and 'function' not in candidate:
             return candidate
 
     # 3️⃣ Look for toss/innings info near the top
@@ -415,7 +415,7 @@ def extract_match_status_from_match_page(soup):
     if toss_elem:
         return toss_elem.text.strip()
 
-    # 4️⃣ Look for result text (e.g., "Team won by X wickets")
+    # 4️⃣ Look for result text (e.g., "Team won by X runs/wickets")
     result_text = soup.find(string=re.compile(r'won by \d+ (run|wicket)', re.I))
     if result_text:
         return result_text.strip()
@@ -432,18 +432,17 @@ def extract_match_status_from_match_page(soup):
     if preview:
         return "Preview"
 
-    # 7️⃣ Very specific fallback: find any small div with a short status-like text
+    # 7️⃣ Very specific fallback: find any small div/span with a short status-like text
     status_elements = soup.find_all(['div', 'span'], string=re.compile(
         r'^(won|live|stumps|innings break|rain|abandoned|opt to bat|opt to field|target|need)',
         re.I
     ))
     for elem in status_elements:
         text = elem.text.strip()
-        if text and len(text) < 50 and not text.startswith('<') and not 'function' in text:
+        if text and len(text) < 50 and not text.startswith('<') and 'function' not in text:
             return text
 
     return None
-
 def extract_start_time_from_match_page(soup):
     """Extract only the start time from a match page (lighter version)."""
     start_time = None
