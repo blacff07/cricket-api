@@ -31,14 +31,11 @@ def fetch_page(url):
     except Exception as e:
         logger.error(f"Unexpected error fetching {url}: {e}")
         return None, "unknown"
- ----------------------------------------------------------------------
+
+# ----------------------------------------------------------------------
 # Live matches list extraction (from homepage)
 # ----------------------------------------------------------------------
 def extract_live_matches(soup):
-    """
-    Extract minimal match information from the Cricbuzz homepage.
-    Returns a list of dicts with keys: id, teams, title, status, start_time.
-    """
     matches = []
     match_blocks = soup.find_all('div', class_='cb-mtch-blk')
     if not match_blocks:
@@ -102,7 +99,6 @@ def extract_live_matches(soup):
 # Detailed match data extraction (from match scorecard page)
 # ----------------------------------------------------------------------
 def extract_match_data(soup):
-    """Extract detailed match data from a match scorecard page."""
     title_tag = soup.find('h1')
     if title_tag:
         title = title_tag.get_text(strip=True)
@@ -135,7 +131,6 @@ def extract_match_data(soup):
     }
 
 def extract_current_score(soup):
-    """Extract current score block: team, runs, wickets, overs."""
     score_block = soup.find('div', class_=lambda c: c and 'font-bold' in c and 'text-xl' in c and 'flex' in c)
     if not score_block:
         return None
@@ -172,7 +167,6 @@ def extract_current_score(soup):
     }
 
 def extract_run_rate(soup):
-    """Extract current run rate (CRR)."""
     crr_elem = soup.find('span', string=re.compile(r'CRR', re.I))
     if crr_elem and crr_elem.parent:
         numbers = re.findall(r'\d+\.?\d*', crr_elem.parent.get_text())
@@ -184,7 +178,6 @@ def extract_run_rate(soup):
     return None
 
 def extract_batting(soup):
-    """Extract batting list (up to 11)."""
     batting = []
     rows = soup.find_all('div', class_=lambda c: c and 'scorecard-bat-grid' in c)
     for row in rows:
@@ -216,7 +209,6 @@ def extract_batting(soup):
     return batting
 
 def extract_bowling(soup):
-    """Extract bowling list (up to 11)."""
     bowling = []
     rows = soup.find_all('div', class_=lambda c: c and 'scorecard-bowl-grid' in c)
     for row in rows:
@@ -249,7 +241,6 @@ def extract_bowling(soup):
     return bowling
 
 def extract_start_time_from_match_page(soup):
-    """Extract start time from the match facts section."""
     date_time_span = soup.find('span', string=re.compile(r'Date & Time:', re.I))
     if date_time_span and date_time_span.find_parent():
         full_text = date_time_span.find_parent().get_text(strip=True)
@@ -261,10 +252,6 @@ def extract_start_time_from_match_page(soup):
     return None
 
 def extract_match_status_from_match_page(soup):
-    """
-    Extract the true match status from a match page.
-    Returns a short string like 'Live', 'Innings Break', 'Team won by X runs', etc.
-    """
     def is_valid_status(text):
         if not text or len(text) > 60:
             return False
