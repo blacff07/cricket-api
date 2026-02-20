@@ -123,14 +123,21 @@ def create_app():
             bowler_one = bowling[0] if len(bowling) > 0 else {}
             bowler_two = bowling[1] if len(bowling) > 1 else {}
 
-            current = data.get('current_score', {})
-            livescore = f"{current.get('team', '')} {current.get('runs', 0)}-{current.get('wickets', 0)} ({current.get('overs', 0)})" if current else 'Data Not Found'
+            # ✅ FIX: Use current_score and run_rate from extracted data
+            current = data.get('current_score')
+            if current:
+                livescore = f"{current.get('team', '')} {current.get('runs', 0)}-{current.get('wickets', 0)} ({current.get('overs', 0)})"
+            else:
+                livescore = 'Data Not Found'
+
+            run_rate = data.get('run_rate')
+            runrate_display = f"CRR: {run_rate}" if run_rate is not None else 'Data Not Found'
 
             return jsonify({
                 'title': data.get('title', 'Data Not Found'),
                 'update': data.get('status', 'Data Not Found'),
                 'livescore': livescore,
-                'runrate': f"CRR: {data.get('run_rate', 'Data Not Found')}" if data.get('run_rate') else 'Data Not Found',
+                'runrate': runrate_display,
                 'batterone': batter_one.get('name', 'Data Not Found'),
                 'batsmanonerun': str(batter_one.get('runs', 'Data Not Found')),
                 'batsmanoneball': f"({batter_one.get('balls', 'Data Not Found')})",
