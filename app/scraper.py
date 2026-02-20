@@ -37,8 +37,8 @@ def fetch_page(url):
 # ----------------------------------------------------------------------
 def extract_live_matches(soup):
     """
-    Extract all matches from the Cricbuzz homepage.
-    Returns a list of dicts with keys: id, teams, title, status, start_time.
+    Extract all matches from the Cricbuzz homepage with proper parsing.
+    Returns a list of dicts: id, teams, title, status, start_time.
     """
     matches = []
     # Find all links that point to live cricket scores
@@ -46,28 +46,45 @@ def extract_live_matches(soup):
         href = link['href']
         match_id = int(re.search(r'/live-cricket-scores/(\d+)', href).group(1))
         
-        # Get the title (usually inside a span with class 'text-hvr-underline')
+        # Get the raw title
         title_span = link.find('span', class_='text-hvr-underline')
         if title_span:
-            title = title_span.get_text(strip=True)
+            raw_title = title_span.get_text(strip=True)
         else:
-            title = link.get_text(strip=True)
+            raw_title = link.get_text(strip=True)
         
-        # Try to find the parent container that holds match info
+        # Parse teams and clean title
+        teams = []
+        clean_title = raw_title
+        if ' vs ' in raw_title:
+            # Split on ' vs ' and take first two parts
+            parts = raw_title.split(' vs ')
+            if len(parts) >= 2:
+                # First team: before first comma if any
+                team1 = parts[0].split(',')[0].strip()
+                # Second team: before first comma, and also remove trailing suffixes like "2nd Semi Final"
+                team2_part = parts[1]
+                # Remove common suffixes (match type, result, etc.)
+                team2 = re.sub(r'(\d+(st|nd|rd|th)\s+(Semi\s+)?Final|Eliminator|Match|Preview|won).*$', '', team2_part, flags=re.I).strip()
+                teams = [team1, team2]
+                # Clean title: remove any extra text after the second team
+                clean_title = f"{team1} vs {team2}"
+        
+        # Find the parent container for status and start time
         parent = link.find_parent(['div', 'li'], class_=lambda c: c and ('cb-mtch-blk' in c or 'cb-col' in c))
         status = "Upcoming"
         start_time = None
         
         if parent:
-            # Check for live tag
+            # Status detection
             if parent.find('span', class_=lambda c: c and 'cb-plus-live-tag' in c):
                 status = "Live"
-            # Check for completed match (result text)
             elif parent.find('div', class_=lambda c: c and 'cb-text-complete' in c):
                 status = "Completed"
             elif parent.find('div', string=re.compile(r'won by|win by|complete', re.I)):
                 status = "Completed"
-            # Extract start time
+            
+            # Start time detection
             time_elem = parent.find('span', class_='sch-date')
             if time_elem:
                 start_time = time_elem.get_text(strip=True)
@@ -78,22 +95,15 @@ def extract_live_matches(soup):
                 if time_elem:
                     start_time = time_elem.strip()
         
-        # Parse teams from title (fallback)
-        teams = []
-        if ' vs ' in title:
-            parts = title.split(' vs ')
-            if len(parts) >= 2:
-                teams = [parts[0].split(',')[0].strip(), parts[1].split(',')[0].strip()]
-        
         matches.append({
             'id': match_id,
             'teams': teams,
-            'title': title,
+            'title': clean_title,
             'status': status,
             'start_time': start_time
         })
     
-    # Remove duplicates (some matches may appear multiple times)
+    # Remove duplicates
     unique = {}
     for m in matches:
         if m['id'] not in unique:
