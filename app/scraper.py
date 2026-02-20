@@ -81,6 +81,7 @@ def parse_scorecard_from_json(json_data):
         batting = []
         bowling = []
         current_score = None
+        run_rate = None
 
         for innings in match.get('scorecard', []):
             # Batting
@@ -114,9 +115,9 @@ def parse_scorecard_from_json(json_data):
                     'wickets': score_details.get('wickets', 0),
                     'overs': float(score_details.get('overs', 0))
                 }
-
-        # Run rate not directly in JSON, we can compute from batting later if needed
-        run_rate = None
+                # Compute run rate from current score
+                if current_score['overs'] > 0:
+                    run_rate = round(current_score['runs'] / current_score['overs'], 2)
 
         return {
             'title': title,
@@ -137,7 +138,7 @@ def parse_scorecard_from_json(json_data):
 # ----------------------------------------------------------------------
 def extract_live_matches(soup):
     matches = []
-    # Find all match links (they are <a> tags with specific classes)
+    # Find ALL match links (they are <a> tags with specific classes)
     match_links = soup.find_all('a', class_=lambda c: c and 'w-full bg-cbWhite flex flex-col p-3 gap-1' in c)
     if not match_links:
         # Fallback: look for any link containing '/live-cricket-scores/'
@@ -190,9 +191,7 @@ def extract_live_matches(soup):
             result_span = link.find('span', class_=lambda c: c and 'text-cbComplete' in c)
             if result_span:
                 result_text = result_span.get_text(strip=True).lower()
-                if any(word in result_text for word in ['won', 'win']):
-                    status = "Completed"
-                elif 'complete' in result_text:
+                if any(word in result_text for word in ['won', 'win', 'complete']):
                     status = "Completed"
                 else:
                     # If result span exists but doesn't contain "won", it might be a status like "Innings Break"
