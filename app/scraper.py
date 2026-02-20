@@ -83,7 +83,7 @@ def parse_scorecard_from_json(json_data):
         current_score = None
         run_rate = None
 
-        # Process all innings to collect batting and bowling
+        # Process all innings to collect batting and bowling, and find a valid score
         for innings in match.get('scorecard', []):
             # Batting
             batsmen = innings.get('batTeamDetails', {}).get('batsmanData', [])
@@ -107,27 +107,34 @@ def parse_scorecard_from_json(json_data):
                     'wickets': int(b.get('wickets', 0)),
                     'econ': float(b.get('economy', 0))
                 })
+            # Score – try to get from any innings, preferring the current one if marked
+            score_details = innings.get('batTeamDetails', {}).get('scoreDetails', {})
+            if score_details and score_details.get('runs', 0) > 0:
+                # If we haven't set a score yet, or this innings is current, use it
+                if current_score is None or innings.get('isCurrentInnings'):
+                    current_score = {
+                        'team': innings['batTeamDetails'].get('teamName', ''),
+                        'runs': score_details.get('runs', 0),
+                        'wickets': score_details.get('wickets', 0),
+                        'overs': float(score_details.get('overs', 0))
+                    }
+                    if current_score['overs'] > 0:
+                        run_rate = round(current_score['runs'] / current_score['overs'], 2)
 
-        # Determine current score:
-        # 1. Look for an active innings (isCurrentInnings = true)
-        # 2. If none, use the first innings (most relevant for completed matches)
-        if match.get('scorecard'):
-            active_innings = None
+        # If still no score, try the first innings with data (fallback)
+        if current_score is None and match.get('scorecard'):
             for innings in match['scorecard']:
-                if innings.get('isCurrentInnings'):
-                    active_innings = innings
+                score_details = innings.get('batTeamDetails', {}).get('scoreDetails', {})
+                if score_details and score_details.get('runs', 0) > 0:
+                    current_score = {
+                        'team': innings['batTeamDetails'].get('teamName', ''),
+                        'runs': score_details.get('runs', 0),
+                        'wickets': score_details.get('wickets', 0),
+                        'overs': float(score_details.get('overs', 0))
+                    }
+                    if current_score['overs'] > 0:
+                        run_rate = round(current_score['runs'] / current_score['overs'], 2)
                     break
-            target_innings = active_innings if active_innings else match['scorecard'][0]
-            score_details = target_innings.get('batTeamDetails', {}).get('scoreDetails', {})
-            if score_details:
-                current_score = {
-                    'team': target_innings['batTeamDetails'].get('teamName', ''),
-                    'runs': score_details.get('runs', 0),
-                    'wickets': score_details.get('wickets', 0),
-                    'overs': float(score_details.get('overs', 0))
-                }
-                if current_score['overs'] > 0:
-                    run_rate = round(current_score['runs'] / current_score['overs'], 2)
 
         return {
             'title': title,
@@ -249,6 +256,7 @@ def extract_match_data(soup):
     json_data = extract_json_data(soup)
     if json_data:
         data = parse_scorecard_from_json(json_data)
+        # If we got data but current_score is missing, still accept (maybe no score yet)
         if data:
             return data
 
