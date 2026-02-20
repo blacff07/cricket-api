@@ -108,13 +108,20 @@ def parse_scorecard_from_json(json_data):
                     'econ': float(b.get('economy', 0))
                 })
 
-        # Set current_score from the first innings (most prominent on the page)
-        if match.get('scorecard') and len(match['scorecard']) > 0:
-            first_innings = match['scorecard'][0]
-            score_details = first_innings.get('batTeamDetails', {}).get('scoreDetails', {})
+        # Determine current score:
+        # 1. Look for an active innings (isCurrentInnings = true)
+        # 2. If none, use the first innings (most relevant for completed matches)
+        if match.get('scorecard'):
+            active_innings = None
+            for innings in match['scorecard']:
+                if innings.get('isCurrentInnings'):
+                    active_innings = innings
+                    break
+            target_innings = active_innings if active_innings else match['scorecard'][0]
+            score_details = target_innings.get('batTeamDetails', {}).get('scoreDetails', {})
             if score_details:
                 current_score = {
-                    'team': first_innings['batTeamDetails'].get('teamName', ''),
+                    'team': target_innings['batTeamDetails'].get('teamName', ''),
                     'runs': score_details.get('runs', 0),
                     'wickets': score_details.get('wickets', 0),
                     'overs': float(score_details.get('overs', 0))
