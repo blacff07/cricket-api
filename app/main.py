@@ -30,7 +30,6 @@ def cache_ttl(seconds=Config.CACHE_TTL):
     return decorator
 
 def create_app():
-    """Application factory – MUST be a top‑level function."""
     app = Flask(__name__)
     app.config.from_object(Config)
     CORS(app, origins=Config.CORS_ORIGINS)
@@ -61,7 +60,7 @@ def create_app():
     @cache_ttl(15)
     def live_matches():
         try:
-            url = f"{Config.CRICBUZZ_URL}/"
+            url = f"{Config.CRICBUZZ_URL}/cricket-match/live-scores"
             soup, error = fetch_page(url)
             if soup is None:
                 if error == "timeout":
@@ -99,7 +98,8 @@ def create_app():
             except ValueError:
                 return error_response(400, 'INVALID_ID', 'Match id must be an integer')
 
-            url = f"{Config.CRICBUZZ_URL}/live-cricket-scores/{match_id_int}"
+            # Use the correct scorecard URL
+            url = f"{Config.CRICBUZZ_URL}/live-cricket-scorecard/{match_id_int}"
             soup, error = fetch_page(url)
             if soup is None:
                 if error == "timeout":
