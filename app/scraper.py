@@ -111,37 +111,39 @@ def extract_live_matches(soup):
     return list(unique.values())
 
 # ----------------------------------------------------------------------
-# Detailed match data extraction (from match scorecard page)
+# Detailed match data extraction (robust version)
 # ----------------------------------------------------------------------
 def extract_match_data(soup):
     """Extract detailed match data from a match scorecard page."""
     # Title
     title_tag = soup.find('h1')
-    title = title_tag.get_text(strip=True).replace(', Commentary', '').replace(' - Scorecard', '').strip() if title_tag else None
-    
+    title = title_tag.get_text(strip=True) if title_tag else None
+    if title:
+        title = title.replace(', Commentary', '').replace(' - Scorecard', '').strip()
+
     # Teams from title
     teams = []
     if title and ' vs ' in title:
         parts = title.split(' vs ')
         if len(parts) >= 2:
             teams = [parts[0].split(',')[0].strip(), parts[1].split(',')[0].strip()]
-    
+
     # Status
     status = extract_match_status_from_match_page(soup) or 'Match Stats will Update Soon...'
-    
+
     # Current score
     current_score = extract_current_score(soup)
-    
+
     # Run rate
     run_rate = extract_run_rate(soup)
-    
+
     # Batting and bowling
     batting = extract_batting(soup)
     bowling = extract_bowling(soup)
-    
+
     # Start time
     start_time = extract_start_time_from_match_page(soup)
-    
+
     return {
         'title': title,
         'teams': teams,
@@ -154,10 +156,9 @@ def extract_match_data(soup):
     }
 
 def extract_current_score(soup):
-    """Extract current score: team, runs, wickets, overs."""
-    # Try multiple common patterns
-    # 1. Look for the main score block
-    score_block = soup.find('div', class_=lambda c: c and 'font-bold' in c and 'text-xl' in c and 'flex' in c)
+    """Extract current score using multiple possible selectors."""
+    # 1️⃣ Look for the common score block (Cricbuzz often uses this structure)
+    score_block = soup.find('div', class_=lambda c: c and all(x in c for x in ['font-bold', 'text-xl', 'flex']))
     if score_block:
         team_div = score_block.find('div', class_='mr-2')
         team = team_div.get_text(strip=True) if team_div else ''
@@ -174,12 +175,12 @@ def extract_current_score(soup):
                 runs = int(runs_wickets)
             overs_float = float(overs) if overs.replace('.', '').isdigit() else 0.0
             return {'team': team, 'runs': runs, 'wickets': wickets, 'overs': overs_float}
-    
-    # 2. Look for score in a div with class containing "cb-score"
+
+    # 2️⃣ Look for score in a div with class containing "cb-score"
     score_elem = soup.find('div', class_=lambda c: c and 'cb-score' in c)
     if score_elem:
         text = score_elem.get_text(strip=True)
-        # Example: "IND 180/5 (20)"
+        # Pattern: "IND 180/5 (20)"
         match = re.match(r'([A-Za-z]+)\s*(\d+)[/-](\d+)\s*\((\d+\.?\d*)\)', text)
         if match:
             return {
@@ -188,34 +189,85 @@ def extract_current_score(soup):
                 'wickets': int(match.group(3)),
                 'overs': float(match.group(4))
             }
+
+    # 3️⃣ Look for any element with a score-like pattern
+    for elem in soup.find_all(['div', 'span'], string=re.compile(r'\w+\s+\d+[/-]\d+\s*\(\d+\.?\d*\)')):
+        text = elem.get_text(strip=True)
+        match = re.match(r'([A-Za-z]+)\s*(\d+)[/-](\d+)\s*\((\d+\.?\d*)\)', text)
+        if match:
+            return {
+                'team': match.group(1),
+                'runs': int(match.group(2)),
+                'wickets': int(match.group(3)),
+                'overs': float(match.group(4))
+            }
+
     return None
 
 def extract_run_rate(soup):
     """Extract current run rate (CRR)."""
+    # Look for CRR text
     crr_elem = soup.find('span', string=re.compile(r'CRR', re.I))
-    if crr_elem and crr_elem.parent:
-        numbers = re.findall(r'\d+\.?\d*', crr_elem.parent.get_text())
+    if crr_elem:
+        parent = crr_elem.parent
+        if parent:
+            numbers = re.findall(r'\d+\.?\d*', parent.get_text())
+            if numbers:
+                try:
+                    return float(numbers[0])
+                except:
+                    pass
+
+    # Sometimes CRR is in a separate span
+    crr_span = soup.find('span', string=re.compile(r'CRR:\s*\d+\.?\d*', re.I))
+    if crr_span:
+        numbers = re.findall(r'\d+\.?\d*', crr_span.get_text())
         if numbers:
             try:
                 return float(numbers[0])
             except:
                 pass
+
     return None
 
 def extract_batting(soup):
-    """Extract batting statistics."""
+    """Extract batting statistics using multiple strategies."""
     batting = []
-    # Try primary grid class
+
+    # Strategy 1: Find the batting table (most reliable)
+    # Look for a table with headers containing "Batter", "R", "B", "4s", "6s", "SR"
+    tables = soup.find_all('table')
+    for table in tables:
+        header = table.find('tr')
+        if header and any('Batter' in th.get_text() for th in header.find_all(['th', 'td'])):
+            rows = table.find_all('tr')[1:]  # skip header
+            for row in rows:
+                cells = row.find_all(['td', 'th'])
+                if len(cells) >= 7:
+                    name_link = row.find('a', href=lambda h: h and '/profiles/' in h)
+                    if not name_link:
+                        continue
+                    name = name_link.get_text(strip=True).replace(' *', '').replace('†', '')
+                    try:
+                        runs = int(cells[2].get_text(strip=True)) if cells[2].get_text(strip=True).isdigit() else 0
+                        balls = int(cells[3].get_text(strip=True)) if cells[3].get_text(strip=True).isdigit() else 0
+                        fours = int(cells[4].get_text(strip=True)) if cells[4].get_text(strip=True).isdigit() else 0
+                        sixes = int(cells[5].get_text(strip=True)) if cells[5].get_text(strip=True).isdigit() else 0
+                        sr_text = cells[6].get_text(strip=True) if len(cells) > 6 else '0'
+                        sr = float(sr_text) if sr_text.replace('.', '').isdigit() else 0.0
+                        batting.append({'name': name, 'runs': runs, 'balls': balls, 'fours': fours, 'sixes': sixes, 'sr': sr})
+                    except (ValueError, IndexError):
+                        continue
+            if batting:
+                return batting
+
+    # Strategy 2: Look for divs with scorecard grid classes
     rows = soup.find_all('div', class_=lambda c: c and 'scorecard-bat-grid' in c)
-    if not rows:
-        # Fallback to table rows
-        rows = soup.select('table[class*="scorecard"] tbody tr')
     for row in rows:
         name_link = row.find('a', href=lambda h: h and '/profiles/' in h)
         if not name_link:
             continue
         name = name_link.get_text(strip=True).replace(' *', '').replace('†', '')
-        # Try to get stats from divs
         stat_divs = row.find_all('div', class_=lambda c: c and 'flex justify-center items-center' in c)
         if len(stat_divs) >= 5:
             try:
@@ -226,30 +278,44 @@ def extract_batting(soup):
                 sr_text = stat_divs[4].get_text(strip=True)
                 sr = float(sr_text) if sr_text.replace('.', '').isdigit() else 0.0
                 batting.append({'name': name, 'runs': runs, 'balls': balls, 'fours': fours, 'sixes': sixes, 'sr': sr})
-                continue
-            except (ValueError, IndexError):
-                pass
-        # Fallback to table cells
-        tds = row.find_all('td')
-        if len(tds) >= 6:
-            try:
-                runs = int(tds[2].get_text(strip=True)) if tds[2].get_text(strip=True).isdigit() else 0
-                balls = int(tds[3].get_text(strip=True)) if tds[3].get_text(strip=True).isdigit() else 0
-                fours = int(tds[4].get_text(strip=True)) if tds[4].get_text(strip=True).isdigit() else 0
-                sixes = int(tds[5].get_text(strip=True)) if tds[5].get_text(strip=True).isdigit() else 0
-                sr_text = tds[6].get_text(strip=True) if len(tds) > 6 else '0'
-                sr = float(sr_text) if sr_text.replace('.', '').isdigit() else 0.0
-                batting.append({'name': name, 'runs': runs, 'balls': balls, 'fours': fours, 'sixes': sixes, 'sr': sr})
             except (ValueError, IndexError):
                 continue
+
     return batting
 
 def extract_bowling(soup):
-    """Extract bowling statistics."""
+    """Extract bowling statistics using multiple strategies."""
     bowling = []
+
+    # Strategy 1: Find the bowling table
+    tables = soup.find_all('table')
+    for table in tables:
+        header = table.find('tr')
+        if header and any('Bowler' in th.get_text() for th in header.find_all(['th', 'td'])):
+            rows = table.find_all('tr')[1:]  # skip header
+            for row in rows:
+                cells = row.find_all(['td', 'th'])
+                if len(cells) >= 7:
+                    name_link = row.find('a', href=lambda h: h and '/profiles/' in h)
+                    if not name_link:
+                        continue
+                    name = name_link.get_text(strip=True)
+                    try:
+                        overs_text = cells[2].get_text(strip=True)
+                        overs = float(overs_text) if overs_text.replace('.', '').isdigit() else 0.0
+                        maidens = int(cells[3].get_text(strip=True)) if cells[3].get_text(strip=True).isdigit() else 0
+                        runs = int(cells[4].get_text(strip=True)) if cells[4].get_text(strip=True).isdigit() else 0
+                        wickets = int(cells[5].get_text(strip=True)) if cells[5].get_text(strip=True).isdigit() else 0
+                        econ_text = cells[6].get_text(strip=True) if len(cells) > 6 else '0'
+                        econ = float(econ_text) if econ_text.replace('.', '').isdigit() else 0.0
+                        bowling.append({'name': name, 'overs': overs, 'maidens': maidens, 'runs': runs, 'wickets': wickets, 'econ': econ})
+                    except (ValueError, IndexError):
+                        continue
+            if bowling:
+                return bowling
+
+    # Strategy 2: Look for divs with scorecard grid classes
     rows = soup.find_all('div', class_=lambda c: c and 'scorecard-bowl-grid' in c)
-    if not rows:
-        rows = soup.select('table[class*="scorecard"] tbody tr')
     for row in rows:
         name_link = row.find('a', href=lambda h: h and '/profiles/' in h)
         if not name_link:
@@ -266,22 +332,9 @@ def extract_bowling(soup):
                 econ_text = stat_divs[4].get_text(strip=True)
                 econ = float(econ_text) if econ_text.replace('.', '').isdigit() else 0.0
                 bowling.append({'name': name, 'overs': overs, 'maidens': maidens, 'runs': runs, 'wickets': wickets, 'econ': econ})
-                continue
-            except (ValueError, IndexError):
-                pass
-        tds = row.find_all('td')
-        if len(tds) >= 6:
-            try:
-                overs_text = tds[2].get_text(strip=True)
-                overs = float(overs_text) if overs_text.replace('.', '').isdigit() else 0.0
-                maidens = int(tds[3].get_text(strip=True)) if tds[3].get_text(strip=True).isdigit() else 0
-                runs = int(tds[4].get_text(strip=True)) if tds[4].get_text(strip=True).isdigit() else 0
-                wickets = int(tds[5].get_text(strip=True)) if tds[5].get_text(strip=True).isdigit() else 0
-                econ_text = tds[6].get_text(strip=True) if len(tds) > 6 else '0'
-                econ = float(econ_text) if econ_text.replace('.', '').isdigit() else 0.0
-                bowling.append({'name': name, 'overs': overs, 'maidens': maidens, 'runs': runs, 'wickets': wickets, 'econ': econ})
             except (ValueError, IndexError):
                 continue
+
     return bowling
 
 def extract_start_time_from_match_page(soup):
