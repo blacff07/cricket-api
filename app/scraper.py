@@ -83,6 +83,7 @@ def parse_scorecard_from_json(json_data):
         current_score = None
         run_rate = None
 
+        # Iterate over innings to get the last (most recent) innings score
         for innings in match.get('scorecard', []):
             # Batting
             batsmen = innings.get('batTeamDetails', {}).get('batsmanData', [])
@@ -106,7 +107,7 @@ def parse_scorecard_from_json(json_data):
                     'wickets': int(b.get('wickets', 0)),
                     'econ': float(b.get('economy', 0))
                 })
-            # Current score (use the most recent innings)
+            # Current score – use the most recent innings
             score_details = innings.get('batTeamDetails', {}).get('scoreDetails', {})
             if score_details:
                 current_score = {
@@ -115,10 +116,11 @@ def parse_scorecard_from_json(json_data):
                     'wickets': score_details.get('wickets', 0),
                     'overs': float(score_details.get('overs', 0))
                 }
-                # Compute run rate from current score
+                # Compute run rate from current score if overs > 0
                 if current_score['overs'] > 0:
                     run_rate = round(current_score['runs'] / current_score['overs'], 2)
 
+        # If no current_score (e.g., match not started), leave as None
         return {
             'title': title,
             'teams': teams,
@@ -138,83 +140,71 @@ def parse_scorecard_from_json(json_data):
 # ----------------------------------------------------------------------
 def extract_live_matches(soup):
     matches = []
-    # Find ALL match links (they are <a> tags with specific classes)
-    match_links = soup.find_all('a', class_=lambda c: c and 'w-full bg-cbWhite flex flex-col p-3 gap-1' in c)
-    if not match_links:
-        # Fallback: look for any link containing '/live-cricket-scores/'
-        match_links = soup.find_all('a', href=re.compile(r'/live-cricket-scores/\d+'))
-
-    for link in match_links:
-        # Extract match ID from href
+    # Find ALL links that point to a live cricket score page
+    all_links = soup.find_all('a', href=re.compile(r'/live-cricket-scores/\d+'))
+    
+    for link in all_links:
         href = link.get('href', '')
         match = re.search(r'/live-cricket-scores/(\d+)', href)
         if not match:
             continue
         match_id = int(match.group(1))
 
-        # Extract title from 'title' attribute (clean and full)
-        title = link.get('title', '').strip()
-        if not title:
-            # fallback to link text
-            title = link.get_text(strip=True)
+        # Get the parent container that holds the match info
+        # The link itself is the match container in the current Cricbuzz design
+        container = link
 
-        # Extract teams
+        # Extract title from 'title' attribute (clean and full)
+        title = container.get('title', '').strip()
+        if not title:
+            title = container.get_text(strip=True)
+
+        # Extract teams – find all spans with team names
         teams = []
-        # Method 1: find full team name spans (hidden on mobile but present)
-        team_spans = link.find_all('span', class_=lambda c: c and 'hidden wb:block' in c)
-        for span in team_spans:
+        # Look for full team names (hidden on mobile but present)
+        full_team_spans = container.find_all('span', class_=lambda c: c and 'hidden wb:block' in c)
+        for span in full_team_spans:
             name = span.get_text(strip=True)
             if name:
                 teams.append(name)
         # If not found, use short codes
         if not teams:
-            short_spans = link.find_all('span', class_=lambda c: c and 'block wb:hidden' in c)
+            short_spans = container.find_all('span', class_=lambda c: c and 'block wb:hidden' in c)
             for span in short_spans:
                 name = span.get_text(strip=True)
                 if name:
                     teams.append(name)
-        # If still no teams, parse from title
-        if not teams and ' vs ' in title:
-            parts = title.split(' vs ')
-            if len(parts) >= 2:
-                team1 = parts[0].split(',')[0].strip()
-                team2 = re.sub(r',.*$', '', parts[1]).strip()
-                teams = [team1, team2]
 
-        # Determine status based on HTML indicators (most reliable)
+        # Determine status
         status = "Upcoming"
-        # Check for live tag
-        if link.find('span', class_='cbPlusLiveTag'):
+        # Check for live tag inside the container
+        if container.find('span', class_='cbPlusLiveTag'):
             status = "Live"
         else:
-            # Check for result span (Completed)
-            result_span = link.find('span', class_=lambda c: c and 'text-cbComplete' in c)
+            # Check for result span
+            result_span = container.find('span', class_=lambda c: c and 'text-cbComplete' in c)
             if result_span:
                 result_text = result_span.get_text(strip=True).lower()
                 if any(word in result_text for word in ['won', 'win', 'complete']):
                     status = "Completed"
                 else:
-                    # If result span exists but doesn't contain "won", it might be a status like "Innings Break"
-                    status = result_span.get_text(strip=True)
+                    status = result_span.get_text(strip=True)  # e.g., "Innings Break"
             else:
-                # Fallback to title-based detection (only if no HTML indicator)
+                # Fallback to title keywords
                 lower_title = title.lower()
                 if any(word in lower_title for word in ['won', 'complete', 'match drawn', 'abandoned']):
                     status = "Completed"
                 elif any(word in lower_title for word in ['opt to', 'toss', 'stumps', 'lunch', 'tea', 'day', 'innings break', 'need', 'require', 'trail', 'lead']):
                     status = "Live"
-                elif 'preview' in lower_title or 'upcoming' in lower_title:
-                    status = "Upcoming"
 
-        # Extract start time (if available)
+        # Extract start time if present
         start_time = None
-        time_elem = link.find('span', class_='sch-date')
+        time_elem = container.find('span', class_='sch-date')
         if time_elem:
             start_time = time_elem.get_text(strip=True)
         else:
-            # Look for any element with date/time pattern
             time_pattern = re.compile(r'\d{1,2}:\d{2}\s*(AM|PM)|Today|Tomorrow', re.I)
-            time_elem = link.find(string=time_pattern)
+            time_elem = container.find(string=time_pattern)
             if time_elem:
                 start_time = time_elem.strip()
 
@@ -226,7 +216,7 @@ def extract_live_matches(soup):
             'start_time': start_time
         })
 
-    # Remove duplicates
+    # Remove duplicates (some matches may have multiple links)
     unique = {}
     for m in matches:
         if m['id'] not in unique:
