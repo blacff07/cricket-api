@@ -38,7 +38,7 @@ def fetch_page(url):
 def extract_live_matches(soup):
     matches = []
     # Find all match links (they are <a> tags with specific classes)
-    match_links = soup.find_all('a', class_='w-full bg-cbWhite flex flex-col p-3 gap-1')
+    match_links = soup.find_all('a', class_=lambda c: c and 'w-full bg-cbWhite flex flex-col p-3 gap-1' in c)
     if not match_links:
         # Fallback: look for any link containing '/live-cricket-scores/'
         match_links = soup.find_all('a', href=re.compile(r'/live-cricket-scores/\d+'))
@@ -59,19 +59,26 @@ def extract_live_matches(soup):
 
         # Extract teams
         teams = []
-        # Find all team name spans (full names hidden on mobile but present)
+        # Method 1: find full team name spans (hidden on mobile but present)
         team_spans = link.find_all('span', class_=lambda c: c and 'hidden wb:block' in c)
         for span in team_spans:
             name = span.get_text(strip=True)
             if name:
                 teams.append(name)
-        # If full names not found, use short codes
+        # If not found, use short codes
         if not teams:
             short_spans = link.find_all('span', class_=lambda c: c and 'block wb:hidden' in c)
             for span in short_spans:
                 name = span.get_text(strip=True)
                 if name:
                     teams.append(name)
+        # If still no teams, parse from title
+        if not teams and ' vs ' in title:
+            parts = title.split(' vs ')
+            if len(parts) >= 2:
+                team1 = parts[0].split(',')[0].strip()
+                team2 = re.sub(r',.*$', '', parts[1]).strip()
+                teams = [team1, team2]
 
         # Determine status
         status = "Upcoming"
@@ -79,20 +86,18 @@ def extract_live_matches(soup):
         if link.find('span', class_='cbPlusLiveTag'):
             status = "Live"
         else:
-            # Check for result text
-            result_span = link.find('span', class_='text-cbComplete')
+            # Check for result span
+            result_span = link.find('span', class_=lambda c: c and 'text-cbComplete' in c)
             if result_span:
                 result_text = result_span.get_text(strip=True)
-                if result_text and ('won' in result_text.lower() or 'win' in result_text.lower()):
-                    status = "Completed"
-                else:
-                    # If result span exists but no 'won', it might be an update like "Match abandoned"
+                if result_text:
                     status = result_text
+            # If title contains "won", mark as completed (fallback)
+            elif 'won' in title.lower():
+                status = "Completed"
 
-        # Extract start time – not directly in the match block, so we'll leave as None for now
+        # Start time – not directly in match block, leave as null for now
         start_time = None
-        # Optionally, try to find date from parent sections (e.g., "Today", "Tomorrow" headers)
-        # This is more complex; we'll skip for now.
 
         matches.append({
             'id': match_id,
@@ -110,10 +115,9 @@ def extract_live_matches(soup):
     return list(unique.values())
 
 # ----------------------------------------------------------------------
-# Detailed match data extraction (robust version)
+# Detailed match data extraction (from match scorecard page)
 # ----------------------------------------------------------------------
 def extract_match_data(soup):
-    """Extract detailed match data from a match scorecard page."""
     # Title
     title_tag = soup.find('h1')
     title = title_tag.get_text(strip=True) if title_tag else None
@@ -156,8 +160,21 @@ def extract_match_data(soup):
 
 def extract_current_score(soup):
     """Extract current score using multiple possible selectors."""
-    # 1️⃣ Look for the common score block (Cricbuzz often uses this structure)
-    score_block = soup.find('div', class_=lambda c: c and all(x in c for x in ['font-bold', 'text-xl', 'flex']))
+    # Look for score in a div with class containing "cb-score"
+    score_elem = soup.find('div', class_=lambda c: c and 'cb-score' in c)
+    if score_elem:
+        text = score_elem.get_text(strip=True)
+        # Pattern: "IND 180/5 (20)"
+        match = re.match(r'([A-Za-z]+)\s*(\d+)[/-](\d+)\s*\((\d+\.?\d*)\)', text)
+        if match:
+            return {
+                'team': match.group(1),
+                'runs': int(match.group(2)),
+                'wickets': int(match.group(3)),
+                'overs': float(match.group(4))
+            }
+    # Alternative: look for a div with font-bold text-xl flex
+    score_block = soup.find('div', class_=lambda c: c and 'font-bold' in c and 'text-xl' in c and 'flex' in c)
     if score_block:
         team_div = score_block.find('div', class_='mr-2')
         team = team_div.get_text(strip=True) if team_div else ''
@@ -174,38 +191,10 @@ def extract_current_score(soup):
                 runs = int(runs_wickets)
             overs_float = float(overs) if overs.replace('.', '').isdigit() else 0.0
             return {'team': team, 'runs': runs, 'wickets': wickets, 'overs': overs_float}
-
-    # 2️⃣ Look for score in a div with class containing "cb-score"
-    score_elem = soup.find('div', class_=lambda c: c and 'cb-score' in c)
-    if score_elem:
-        text = score_elem.get_text(strip=True)
-        # Pattern: "IND 180/5 (20)"
-        match = re.match(r'([A-Za-z]+)\s*(\d+)[/-](\d+)\s*\((\d+\.?\d*)\)', text)
-        if match:
-            return {
-                'team': match.group(1),
-                'runs': int(match.group(2)),
-                'wickets': int(match.group(3)),
-                'overs': float(match.group(4))
-            }
-
-    # 3️⃣ Look for any element with a score-like pattern
-    for elem in soup.find_all(['div', 'span'], string=re.compile(r'\w+\s+\d+[/-]\d+\s*\(\d+\.?\d*\)')):
-        text = elem.get_text(strip=True)
-        match = re.match(r'([A-Za-z]+)\s*(\d+)[/-](\d+)\s*\((\d+\.?\d*)\)', text)
-        if match:
-            return {
-                'team': match.group(1),
-                'runs': int(match.group(2)),
-                'wickets': int(match.group(3)),
-                'overs': float(match.group(4))
-            }
-
     return None
 
 def extract_run_rate(soup):
     """Extract current run rate (CRR)."""
-    # Look for CRR text
     crr_elem = soup.find('span', string=re.compile(r'CRR', re.I))
     if crr_elem:
         parent = crr_elem.parent
@@ -216,8 +205,6 @@ def extract_run_rate(soup):
                     return float(numbers[0])
                 except:
                     pass
-
-    # Sometimes CRR is in a separate span
     crr_span = soup.find('span', string=re.compile(r'CRR:\s*\d+\.?\d*', re.I))
     if crr_span:
         numbers = re.findall(r'\d+\.?\d*', crr_span.get_text())
@@ -226,15 +213,12 @@ def extract_run_rate(soup):
                 return float(numbers[0])
             except:
                 pass
-
     return None
 
 def extract_batting(soup):
     """Extract batting statistics using multiple strategies."""
     batting = []
-
     # Strategy 1: Find the batting table (most reliable)
-    # Look for a table with headers containing "Batter", "R", "B", "4s", "6s", "SR"
     tables = soup.find_all('table')
     for table in tables:
         header = table.find('tr')
@@ -279,13 +263,11 @@ def extract_batting(soup):
                 batting.append({'name': name, 'runs': runs, 'balls': balls, 'fours': fours, 'sixes': sixes, 'sr': sr})
             except (ValueError, IndexError):
                 continue
-
     return batting
 
 def extract_bowling(soup):
     """Extract bowling statistics using multiple strategies."""
     bowling = []
-
     # Strategy 1: Find the bowling table
     tables = soup.find_all('table')
     for table in tables:
@@ -333,7 +315,6 @@ def extract_bowling(soup):
                 bowling.append({'name': name, 'overs': overs, 'maidens': maidens, 'runs': runs, 'wickets': wickets, 'econ': econ})
             except (ValueError, IndexError):
                 continue
-
     return bowling
 
 def extract_start_time_from_match_page(soup):
