@@ -36,73 +36,72 @@ def fetch_page(url):
 # Live matches list extraction (from homepage)
 # ----------------------------------------------------------------------
 def extract_live_matches(soup):
-    """
-    Extract all matches from the Cricbuzz homepage with proper parsing.
-    Returns a list of dicts: id, teams, title, status, start_time.
-    """
     matches = []
-    # Find all links that point to live cricket scores
-    for link in soup.find_all('a', href=re.compile(r'/live-cricket-scores/\d+')):
-        href = link['href']
-        match_id = int(re.search(r'/live-cricket-scores/(\d+)', href).group(1))
-        
-        # Get the raw title
-        title_span = link.find('span', class_='text-hvr-underline')
-        if title_span:
-            raw_title = title_span.get_text(strip=True)
-        else:
-            raw_title = link.get_text(strip=True)
-        
-        # Parse teams and clean title
+    # Find all match links (they are <a> tags with specific classes)
+    match_links = soup.find_all('a', class_='w-full bg-cbWhite flex flex-col p-3 gap-1')
+    if not match_links:
+        # Fallback: look for any link containing '/live-cricket-scores/'
+        match_links = soup.find_all('a', href=re.compile(r'/live-cricket-scores/\d+'))
+
+    for link in match_links:
+        # Extract match ID from href
+        href = link.get('href', '')
+        match = re.search(r'/live-cricket-scores/(\d+)', href)
+        if not match:
+            continue
+        match_id = int(match.group(1))
+
+        # Extract title from 'title' attribute (clean and full)
+        title = link.get('title', '').strip()
+        if not title:
+            # fallback to link text
+            title = link.get_text(strip=True)
+
+        # Extract teams
         teams = []
-        clean_title = raw_title
-        if ' vs ' in raw_title:
-            # Split on ' vs ' and take first two parts
-            parts = raw_title.split(' vs ')
-            if len(parts) >= 2:
-                # First team: before first comma if any
-                team1 = parts[0].split(',')[0].strip()
-                # Second team: before first comma, and also remove trailing suffixes like "2nd Semi Final"
-                team2_part = parts[1]
-                # Remove common suffixes (match type, result, etc.)
-                team2 = re.sub(r'(\d+(st|nd|rd|th)\s+(Semi\s+)?Final|Eliminator|Match|Preview|won).*$', '', team2_part, flags=re.I).strip()
-                teams = [team1, team2]
-                # Clean title: remove any extra text after the second team
-                clean_title = f"{team1} vs {team2}"
-        
-        # Find the parent container for status and start time
-        parent = link.find_parent(['div', 'li'], class_=lambda c: c and ('cb-mtch-blk' in c or 'cb-col' in c))
+        # Find all team name spans (full names hidden on mobile but present)
+        team_spans = link.find_all('span', class_=lambda c: c and 'hidden wb:block' in c)
+        for span in team_spans:
+            name = span.get_text(strip=True)
+            if name:
+                teams.append(name)
+        # If full names not found, use short codes
+        if not teams:
+            short_spans = link.find_all('span', class_=lambda c: c and 'block wb:hidden' in c)
+            for span in short_spans:
+                name = span.get_text(strip=True)
+                if name:
+                    teams.append(name)
+
+        # Determine status
         status = "Upcoming"
+        # Check for live tag
+        if link.find('span', class_='cbPlusLiveTag'):
+            status = "Live"
+        else:
+            # Check for result text
+            result_span = link.find('span', class_='text-cbComplete')
+            if result_span:
+                result_text = result_span.get_text(strip=True)
+                if result_text and ('won' in result_text.lower() or 'win' in result_text.lower()):
+                    status = "Completed"
+                else:
+                    # If result span exists but no 'won', it might be an update like "Match abandoned"
+                    status = result_text
+
+        # Extract start time – not directly in the match block, so we'll leave as None for now
         start_time = None
-        
-        if parent:
-            # Status detection
-            if parent.find('span', class_=lambda c: c and 'cb-plus-live-tag' in c):
-                status = "Live"
-            elif parent.find('div', class_=lambda c: c and 'cb-text-complete' in c):
-                status = "Completed"
-            elif parent.find('div', string=re.compile(r'won by|win by|complete', re.I)):
-                status = "Completed"
-            
-            # Start time detection
-            time_elem = parent.find('span', class_='sch-date')
-            if time_elem:
-                start_time = time_elem.get_text(strip=True)
-            else:
-                # Look for any element with date/time pattern
-                time_pattern = re.compile(r'\d{1,2}:\d{2}\s*(AM|PM)|Today|Tomorrow', re.I)
-                time_elem = parent.find(string=time_pattern)
-                if time_elem:
-                    start_time = time_elem.strip()
-        
+        # Optionally, try to find date from parent sections (e.g., "Today", "Tomorrow" headers)
+        # This is more complex; we'll skip for now.
+
         matches.append({
             'id': match_id,
             'teams': teams,
-            'title': clean_title,
+            'title': title,
             'status': status,
             'start_time': start_time
         })
-    
+
     # Remove duplicates
     unique = {}
     for m in matches:
