@@ -28,6 +28,20 @@ def cache_ttl(seconds=Config.CACHE_TTL):
         return wrapper
     return decorator
 
+def get_score_data(match_id_int):
+    url = f"{Config.CRICBUZZ_URL}/live-cricket-scores/{match_id_int}"
+    soup, error = fetch_page(url)
+
+    if soup is None:
+        return None, error
+
+    data = extract_match_data(soup)
+
+    if not data or not data.get('title'):
+        return None, "not_found"
+
+    return data, None
+
 def create_app():
     app = Flask(__name__)
     app.config.from_object(Config)
