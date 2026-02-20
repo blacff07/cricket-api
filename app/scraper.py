@@ -1,7 +1,9 @@
 import re
+import json
 import random
 import requests
 import logging
+from datetime import datetime
 from bs4 import BeautifulSoup
 from .config import Config
 
@@ -33,7 +35,105 @@ def fetch_page(url):
         return None, "unknown"
 
 # ----------------------------------------------------------------------
-# Live matches list extraction (from homepage)
+# JSON extraction from <script id="__NEXT_DATA__">
+# ----------------------------------------------------------------------
+def extract_json_data(soup):
+    script = soup.find('script', id='__NEXT_DATA__')
+    if script and script.string:
+        try:
+            return json.loads(script.string)
+        except json.JSONDecodeError:
+            logger.error("Failed to parse __NEXT_DATA__ JSON")
+    return None
+
+def parse_scorecard_from_json(json_data):
+    """
+    Parse the JSON structure from Cricbuzz scorecard page.
+    Returns a dict with keys: title, teams, status, current_score, run_rate, batting, bowling, start_time.
+    """
+    try:
+        props = json_data['props']['pageProps']
+        if 'matchScorecard' not in props:
+            return None
+        match = props['matchScorecard']
+        header = match['matchHeader']
+
+        title = header.get('matchDescription', '')
+        teams = [
+            header.get('team1', {}).get('name', ''),
+            header.get('team2', {}).get('name', '')
+        ]
+        status = header.get('status', '')
+
+        # Extract start time from JSON (milliseconds timestamp)
+        start_time = None
+        if 'matchDetails' in header and 'match' in header['matchDetails']:
+            match_info = header['matchDetails']['match']
+            if 'startDate' in match_info:
+                ts = match_info['startDate']
+                if ts:
+                    try:
+                        dt = datetime.fromtimestamp(int(ts) / 1000)
+                        start_time = dt.strftime('%a, %b %d, %I:%M %p').replace(' 0', ' ')
+                    except:
+                        pass
+
+        batting = []
+        bowling = []
+        current_score = None
+
+        for innings in match.get('scorecard', []):
+            # Batting
+            batsmen = innings.get('batTeamDetails', {}).get('batsmanData', [])
+            for b in batsmen:
+                batting.append({
+                    'name': b.get('batName', ''),
+                    'runs': int(b.get('runs', 0)),
+                    'balls': int(b.get('balls', 0)),
+                    'fours': int(b.get('fours', 0)),
+                    'sixes': int(b.get('sixes', 0)),
+                    'sr': float(b.get('strikeRate', 0))
+                })
+            # Bowling
+            bowlers = innings.get('bowlTeamDetails', {}).get('bowlerData', [])
+            for b in bowlers:
+                bowling.append({
+                    'name': b.get('bowlName', ''),
+                    'overs': float(b.get('overs', 0)),
+                    'maidens': int(b.get('maidens', 0)),
+                    'runs': int(b.get('runs', 0)),
+                    'wickets': int(b.get('wickets', 0)),
+                    'econ': float(b.get('economy', 0))
+                })
+            # Current score (use the most recent innings)
+            score_details = innings.get('batTeamDetails', {}).get('scoreDetails', {})
+            if score_details:
+                current_score = {
+                    'team': innings['batTeamDetails'].get('teamName', ''),
+                    'runs': score_details.get('runs', 0),
+                    'wickets': score_details.get('wickets', 0),
+                    'overs': float(score_details.get('overs', 0))
+                }
+
+        # Run rate not directly in JSON, we can compute from batting later if needed
+        run_rate = None
+
+        return {
+            'title': title,
+            'teams': teams,
+            'status': status,
+            'start_time': start_time,
+            'current_score': current_score,
+            'run_rate': run_rate,
+            'batting': batting,
+            'bowling': bowling
+        }
+    except (KeyError, TypeError, ValueError) as e:
+        logger.error(f"Error parsing JSON scorecard: {e}")
+        return None
+
+# ----------------------------------------------------------------------
+# Live matches list extraction (from homepage /live-scores)
 # ----------------------------------------------------------------------
 def extract_live_matches(soup):
     matches = []
@@ -80,24 +180,44 @@ def extract_live_matches(soup):
                 team2 = re.sub(r',.*$', '', parts[1]).strip()
                 teams = [team1, team2]
 
-        # Determine status
+        # Determine status based on HTML indicators (most reliable)
         status = "Upcoming"
         # Check for live tag
         if link.find('span', class_='cbPlusLiveTag'):
             status = "Live"
         else:
-            # Check for result span
+            # Check for result span (Completed)
             result_span = link.find('span', class_=lambda c: c and 'text-cbComplete' in c)
             if result_span:
-                result_text = result_span.get_text(strip=True)
-                if result_text:
-                    status = result_text
-            # If title contains "won", mark as completed (fallback)
-            elif 'won' in title.lower():
-                status = "Completed"
+                result_text = result_span.get_text(strip=True).lower()
+                if any(word in result_text for word in ['won', 'win']):
+                    status = "Completed"
+                elif 'complete' in result_text:
+                    status = "Completed"
+                else:
+                    # If result span exists but doesn't contain "won", it might be a status like "Innings Break"
+                    status = result_span.get_text(strip=True)
+            else:
+                # Fallback to title-based detection (only if no HTML indicator)
+                lower_title = title.lower()
+                if any(word in lower_title for word in ['won', 'complete', 'match drawn', 'abandoned']):
+                    status = "Completed"
+                elif any(word in lower_title for word in ['opt to', 'toss', 'stumps', 'lunch', 'tea', 'day', 'innings break', 'need', 'require', 'trail', 'lead']):
+                    status = "Live"
+                elif 'preview' in lower_title or 'upcoming' in lower_title:
+                    status = "Upcoming"
 
-        # Start time – not directly in match block, leave as null for now
+        # Extract start time (if available)
         start_time = None
+        time_elem = link.find('span', class_='sch-date')
+        if time_elem:
+            start_time = time_elem.get_text(strip=True)
+        else:
+            # Look for any element with date/time pattern
+            time_pattern = re.compile(r'\d{1,2}:\d{2}\s*(AM|PM)|Today|Tomorrow', re.I)
+            time_elem = link.find(string=time_pattern)
+            if time_elem:
+                start_time = time_elem.strip()
 
         matches.append({
             'id': match_id,
@@ -118,33 +238,32 @@ def extract_live_matches(soup):
 # Detailed match data extraction (from match scorecard page)
 # ----------------------------------------------------------------------
 def extract_match_data(soup):
-    # Title
+    """Extract detailed match data, trying JSON first, then HTML."""
+    # First try JSON
+    json_data = extract_json_data(soup)
+    if json_data:
+        data = parse_scorecard_from_json(json_data)
+        if data:
+            return data
+
+    logger.warning("JSON extraction failed, falling back to HTML parsing")
+    # Fallback: HTML parsing
     title_tag = soup.find('h1')
     title = title_tag.get_text(strip=True) if title_tag else None
     if title:
         title = title.replace(', Commentary', '').replace(' - Scorecard', '').strip()
 
-    # Teams from title
     teams = []
     if title and ' vs ' in title:
         parts = title.split(' vs ')
         if len(parts) >= 2:
             teams = [parts[0].split(',')[0].strip(), parts[1].split(',')[0].strip()]
 
-    # Status
     status = extract_match_status_from_match_page(soup) or 'Match Stats will Update Soon...'
-
-    # Current score
     current_score = extract_current_score(soup)
-
-    # Run rate
     run_rate = extract_run_rate(soup)
-
-    # Batting and bowling
     batting = extract_batting(soup)
     bowling = extract_bowling(soup)
-
-    # Start time
     start_time = extract_start_time_from_match_page(soup)
 
     return {
@@ -318,7 +437,7 @@ def extract_bowling(soup):
     return bowling
 
 def extract_start_time_from_match_page(soup):
-    """Extract start time from match facts."""
+    """Extract start time from match facts (HTML fallback)."""
     date_time_span = soup.find('span', string=re.compile(r'Date & Time:', re.I))
     if date_time_span and date_time_span.find_parent():
         full_text = date_time_span.find_parent().get_text(strip=True)
@@ -330,7 +449,7 @@ def extract_start_time_from_match_page(soup):
     return None
 
 def extract_match_status_from_match_page(soup):
-    """Extract the match status (Live, Completed, Innings Break, etc.)."""
+    """Extract the match status (Live, Completed, Innings Break, etc.) from HTML."""
     def is_valid_status(text):
         if not text or len(text) > 60:
             return False
