@@ -83,7 +83,7 @@ def parse_scorecard_from_json(json_data):
         current_score = None
         run_rate = None
 
-        # Iterate over innings to get the last (most recent) innings score
+        # Process all innings to collect batting and bowling
         for innings in match.get('scorecard', []):
             # Batting
             batsmen = innings.get('batTeamDetails', {}).get('batsmanData', [])
@@ -107,20 +107,21 @@ def parse_scorecard_from_json(json_data):
                     'wickets': int(b.get('wickets', 0)),
                     'econ': float(b.get('economy', 0))
                 })
-            # Current score – use the most recent innings
-            score_details = innings.get('batTeamDetails', {}).get('scoreDetails', {})
+
+        # Set current_score from the first innings (most prominent on the page)
+        if match.get('scorecard') and len(match['scorecard']) > 0:
+            first_innings = match['scorecard'][0]
+            score_details = first_innings.get('batTeamDetails', {}).get('scoreDetails', {})
             if score_details:
                 current_score = {
-                    'team': innings['batTeamDetails'].get('teamName', ''),
+                    'team': first_innings['batTeamDetails'].get('teamName', ''),
                     'runs': score_details.get('runs', 0),
                     'wickets': score_details.get('wickets', 0),
                     'overs': float(score_details.get('overs', 0))
                 }
-                # Compute run rate from current score if overs > 0
                 if current_score['overs'] > 0:
                     run_rate = round(current_score['runs'] / current_score['overs'], 2)
 
-        # If no current_score (e.g., match not started), leave as None
         return {
             'title': title,
             'teams': teams,
@@ -150,8 +151,7 @@ def extract_live_matches(soup):
             continue
         match_id = int(match.group(1))
 
-        # Get the parent container that holds the match info
-        # The link itself is the match container in the current Cricbuzz design
+        # The link itself is the match container in current Cricbuzz design
         container = link
 
         # Extract title from 'title' attribute (clean and full)
@@ -159,9 +159,9 @@ def extract_live_matches(soup):
         if not title:
             title = container.get_text(strip=True)
 
-        # Extract teams – find all spans with team names
+        # Extract teams – try span-based first, then fallback to title parsing
         teams = []
-        # Look for full team names (hidden on mobile but present)
+        # Look for full team name spans (hidden on mobile but present)
         full_team_spans = container.find_all('span', class_=lambda c: c and 'hidden wb:block' in c)
         for span in full_team_spans:
             name = span.get_text(strip=True)
@@ -174,10 +174,20 @@ def extract_live_matches(soup):
                 name = span.get_text(strip=True)
                 if name:
                     teams.append(name)
+        # If still no teams, parse from title (most reliable fallback)
+        if not teams and ' vs ' in title:
+            # Remove any suffix after " - " to get a cleaner title
+            clean_title = re.sub(r'\s+-\s+.*$', '', title)
+            if ' vs ' in clean_title:
+                parts = clean_title.split(' vs ')
+                if len(parts) >= 2:
+                    team1 = parts[0].split(',')[0].strip()
+                    team2 = parts[1].split(',')[0].strip()
+                    teams = [team1, team2]
 
         # Determine status
         status = "Upcoming"
-        # Check for live tag inside the container
+        # Check for live tag
         if container.find('span', class_='cbPlusLiveTag'):
             status = "Live"
         else:
