@@ -74,16 +74,13 @@ def extract_live_matches(soup):
         else:
             status = "Upcoming"
         
-        # Extract teams more robustly
+        # Extract teams robustly
         teams = []
         # Try to find "Team vs Team" pattern
         vs_match = re.search(r'([A-Za-z\s]+?)\s+vs\s+([A-Za-z\s]+)', title, re.I)
         if vs_match:
             team1 = vs_match.group(1).strip()
             team2 = vs_match.group(2).strip()
-            # Take only the first word if it's a country name
-            team1 = team1.split()[0] if team1 else ''
-            team2 = team2.split()[0] if team2 else ''
             if team1 and team2:
                 teams = [team1, team2]
         else:
@@ -110,6 +107,9 @@ def extract_live_matches(soup):
     logger.info(f"Extracted {len(result)} unique matches")
     return result
 
+# ----------------------------------------------------------------------
+# Detailed match data extraction (unchanged, working)
+# ----------------------------------------------------------------------
 def extract_match_data(soup):
     """Extract detailed match data from a match scorecard page."""
     title_tag = soup.find('h1')
