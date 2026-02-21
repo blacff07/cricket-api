@@ -158,7 +158,7 @@ def create_app():
         return match_live(match_id)
 
     # ------------------------------------------------------------------
-    # Legacy endpoints (restored and fixed)
+    # Legacy endpoints (fixed)
     # ------------------------------------------------------------------
     @app.route('/score', methods=['GET'])
     def score_legacy():
@@ -168,7 +168,7 @@ def create_app():
 
         try:
             match_id_int = int(match_id)
-            # Reuse the modern endpoint's data
+            # Get the JSON data from the modern endpoint
             response = match_live(match_id_int)
             data = response.get_json()
 
@@ -222,6 +222,7 @@ def create_app():
             
         try:
             match_id_int = int(match_id)
+            # Get the JSON data from the score_legacy endpoint
             response = score_legacy()
             data = response.get_json()
             
