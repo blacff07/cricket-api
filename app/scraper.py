@@ -8,11 +8,9 @@ from .config import Config
 logger = logging.getLogger(__name__)
 
 def get_random_agent():
-    """Return a random user agent from the configuration list."""
     return random.choice(Config.USER_AGENTS)
 
 def fetch_page(url):
-    """Fetch a page from Cricbuzz and return a BeautifulSoup object."""
     headers = {
         'User-Agent': get_random_agent(),
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
@@ -39,9 +37,6 @@ def fetch_page(url):
         logger.error(f"Unexpected error fetching {url}: {e}")
         return None, "unknown"
 
-# ----------------------------------------------------------------------
-# Live matches list extraction - SIMPLE ANCHOR TAG METHOD
-# ----------------------------------------------------------------------
 def extract_live_matches(soup):
     """Extract live matches from the Cricbuzz homepage using anchor tags."""
     matches = []
@@ -84,33 +79,21 @@ def extract_live_matches(soup):
             if len(codes) >= 2:
                 teams = codes[:2]
         
-        # series not used by bot but keep for completeness
-        series = "Unknown Series"
-        if ',' in title:
-            parts = title.split(',')
-            if len(parts) > 1:
-                series = parts[1].strip()
-        
         matches.append({
             'id': match_id,
             'teams': teams,
             'title': title,
-            'series': series,
             'status': status,
             'link': href
         })
     
     unique = {m['id']: m for m in matches}
     result = list(unique.values())
-    logger.info(f"Extracted {len(result)} unique matches using simple method")
+    logger.info(f"Extracted {len(result)} unique matches")
     return result
 
-# ----------------------------------------------------------------------
-# Detailed match data extraction (full scorecard)
-# ----------------------------------------------------------------------
 def extract_match_data(soup):
     """Extract detailed match data from a match scorecard page."""
-    # Title
     title_tag = soup.find('h1')
     if title_tag:
         title = title_tag.get_text(strip=True)
@@ -118,29 +101,17 @@ def extract_match_data(soup):
     else:
         title = None
 
-    # Teams from title
     teams = []
     if title and ' vs ' in title:
         parts = title.split(' vs ')
         if len(parts) >= 2:
             teams = [parts[0].split(',')[0].strip(), parts[1].split(',')[0].strip()]
 
-    # Status
     status = extract_match_status_from_match_page(soup) or 'Match Stats will Update Soon...'
-
-    # Current score
     current_score = extract_current_score(soup)
-
-    # Run rate
     run_rate = extract_run_rate(soup)
-
-    # Batting
     batting = extract_batting(soup)
-
-    # Bowling
     bowling = extract_bowling(soup)
-
-    # Start time
     start_time = extract_start_time_from_match_page(soup)
 
     return {
@@ -155,7 +126,6 @@ def extract_match_data(soup):
     }
 
 def extract_current_score(soup):
-    """Extract current score block: team, runs, wickets, overs."""
     score_block = soup.find('div', class_=lambda c: c and 'font-bold' in c and 'text-xl' in c and 'flex' in c)
     if not score_block:
         return None
@@ -200,7 +170,6 @@ def extract_current_score(soup):
     }
 
 def extract_run_rate(soup):
-    """Extract current run rate (CRR)."""
     crr_elem = soup.find('span', string=re.compile(r'CRR', re.I))
     if crr_elem:
         parent = crr_elem.parent
@@ -220,7 +189,6 @@ def extract_run_rate(soup):
     return None
 
 def extract_batting(soup):
-    """Extract batting list (up to 11)."""
     batting = []
     rows = soup.find_all('div', class_=lambda c: c and 'scorecard-bat-grid' in c)
     for row in rows:
@@ -251,7 +219,6 @@ def extract_batting(soup):
     return batting
 
 def extract_bowling(soup):
-    """Extract bowling list (up to 11)."""
     bowling = []
     rows = soup.find_all('div', class_=lambda c: c and 'scorecard-bowl-grid' in c)
     for row in rows:
@@ -283,9 +250,7 @@ def extract_bowling(soup):
     return bowling
 
 def extract_start_time_from_match_page(soup):
-    """Extract only the start time from a match page (lighter version)."""
     start_time = None
-    # Look for the Date & Time label
     date_time_span = soup.find('span', string=re.compile(r'Date & Time:', re.I))
     if date_time_span:
         parent = date_time_span.find_parent()
@@ -293,14 +258,12 @@ def extract_start_time_from_match_page(soup):
             full_text = parent.get_text(strip=True)
             start_time = full_text.replace('Date & Time:', '').strip()
     if not start_time:
-        # Fallback: look for any element containing a time pattern
         time_elem = soup.find(string=re.compile(r'\d{1,2}:\d{2}\s*(AM|PM)', re.I))
         if time_elem:
             start_time = time_elem.strip()
     return start_time
 
 def extract_match_status_from_match_page(soup):
-    """Extract the true match status from a match page."""
     def is_valid_status(text):
         if not text or len(text) > 60:
             return False
@@ -317,33 +280,28 @@ def extract_match_status_from_match_page(soup):
                           'abandoned', 'opt', 'target', 'need', 'required', 'break']
         return any(kw in lower_text for kw in status_keywords)
 
-    # 1️⃣ Live badge
     live_badge = soup.find('span', class_=lambda c: c and 'cb-plus-live-tag' in c)
     if live_badge:
         return "Live"
 
-    # 2️⃣ cb-text- class
     status_div = soup.find('div', class_=lambda c: c and 'cb-text-' in c)
     if status_div:
         candidate = status_div.get_text(strip=True)
         if is_valid_status(candidate):
             return candidate
 
-    # 3️⃣ Toss text
     toss_elem = soup.find('div', string=re.compile(r'opt to (bat|field)', re.I))
     if toss_elem:
         candidate = toss_elem.get_text(strip=True)
         if is_valid_status(candidate):
             return candidate
 
-    # 4️⃣ Result text
     result_elem = soup.find('div', string=re.compile(r'won by \d+ (run|wicket)', re.I))
     if result_elem:
         candidate = result_elem.get_text(strip=True)
         if is_valid_status(candidate):
             return candidate
 
-    # 5️⃣ Keywords
     status_keywords = ['innings break', 'stumps', 'rain', 'abandoned', 'lunch', 'tea']
     for kw in status_keywords:
         elem = soup.find('div', string=re.compile(kw, re.I))
@@ -352,12 +310,10 @@ def extract_match_status_from_match_page(soup):
             if is_valid_status(candidate):
                 return candidate
 
-    # 6️⃣ Preview
     preview_div = soup.find('div', class_=lambda c: c and 'cb-text-preview' in c)
     if preview_div:
         return "Preview"
 
-    # 7️⃣ Header area fallback
     header = soup.find('div', class_=lambda c: c and 'cb-col-100' in c and 'cb-miniscroll' in c)
     if header:
         for elem in header.find_all(['div', 'span']):
