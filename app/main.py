@@ -175,6 +175,7 @@ def create_app():
         except ValueError:
             return json_error_response()
 
+        # Fetch the match page directly using the scraper
         url = f"{Config.CRICBUZZ_URL}/live-cricket-scores/{match_id_int}"
         soup, error = fetch_page(url)
         
@@ -212,12 +213,16 @@ def create_app():
         if not data.get('title'):
             return fallback_response()
 
+        # Extract data exactly like the modern endpoint
         batting = data.get('batting', [])
         bowling = data.get('bowling', [])
+        
+        # Take first two batsmen/bowlers for legacy format
         batter_one = batting[0] if len(batting) > 0 else {}
         batter_two = batting[1] if len(batting) > 1 else {}
         bowler_one = bowling[0] if len(bowling) > 0 else {}
         bowler_two = bowling[1] if len(bowling) > 1 else {}
+        
         current = data.get('current_score', {})
         livescore = f"{current.get('team', '')} {current.get('runs', 0)}-{current.get('wickets', 0)} ({current.get('overs', 0)})" if current else 'Data Not Found'
         run_rate_val = data.get('run_rate')
@@ -230,11 +235,11 @@ def create_app():
             'runrate': runrate_str,
             'batterone': batter_one.get('name', 'Data Not Found'),
             'batsmanonerun': str(batter_one.get('runs', 'Data Not Found')),
-            'batsmanoneball': f"({batter_one.get('balls', 'Data Not Found')})",
+            'batsmanoneball': f"({batter_one.get('balls', 'Data Not Found')})" if batter_one.get('balls') is not None else 'Data Not Found',
             'batsmanonesr': str(batter_one.get('sr', 'Data Not Found')),
             'battertwo': batter_two.get('name', 'Data Not Found'),
             'batsmantworun': str(batter_two.get('runs', 'Data Not Found')),
-            'batsmantwoball': f"({batter_two.get('balls', 'Data Not Found')})",
+            'batsmantwoball': f"({batter_two.get('balls', 'Data Not Found')})" if batter_two.get('balls') is not None else 'Data Not Found',
             'batsmantwosr': str(batter_two.get('sr', 'Data Not Found')),
             'bowlerone': bowler_one.get('name', 'Data Not Found'),
             'bowleroneover': str(bowler_one.get('overs', 'Data Not Found')),
@@ -250,9 +255,10 @@ def create_app():
 
     @app.route('/score/live', methods=['GET'])
     def live_legacy():
-        # Get the response from the flat legacy endpoint
+        # Get the flat response first
         resp = score_legacy()
         data = resp.get_json()
+        
         if data.get('title') != 'Data Not Found':
             return jsonify({
                 'success': 'true',
