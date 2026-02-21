@@ -158,8 +158,20 @@ def create_app():
         return match_live(match_id)
 
     # ------------------------------------------------------------------
-    # Legacy endpoints (fixed)
+    # Legacy endpoints (FIXED)
     # ------------------------------------------------------------------
+    def get_match_data_for_legacy(match_id):
+        """Helper to get the data dictionary from match_live."""
+        try:
+            response = match_live(match_id)
+            # response is a Flask Response object, we need its JSON
+            data = response.get_json()
+            if data and data.get('success'):
+                return data.get('data')
+        except Exception as e:
+            logger.error(f"Error in get_match_data_for_legacy: {e}")
+        return None
+
     @app.route('/score', methods=['GET'])
     def score_legacy():
         match_id = escape(request.args.get('id', ''))
@@ -168,49 +180,70 @@ def create_app():
 
         try:
             match_id_int = int(match_id)
-            # Get the JSON data from the modern endpoint
-            response = match_live(match_id_int)
-            data = response.get_json()
-
-            if data.get('success'):
-                d = data['data']
-                batting = d.get('batting', [])
-                bowling = d.get('bowling', [])
-
-                batter_one = batting[0] if len(batting) > 0 else {}
-                batter_two = batting[1] if len(batting) > 1 else {}
-                bowler_one = bowling[0] if len(bowling) > 0 else {}
-                bowler_two = bowling[1] if len(bowling) > 1 else {}
-
-                current = d.get('current_score', {})
-                livescore = f"{current.get('team', '')} {current.get('runs', 0)}-{current.get('wickets', 0)} ({current.get('overs', 0)})" if current else 'Data Not Found'
-
+            d = get_match_data_for_legacy(match_id_int)
+            
+            if not d:
+                # Return fallback "Data Not Found" response
                 return jsonify({
-                    'title': d.get('title', 'Data Not Found'),
-                    'update': d.get('status', 'Data Not Found'),
-                    'livescore': livescore,
-                    'runrate': f"CRR: {d.get('run_rate', 'Data Not Found')}" if d.get('run_rate') else 'Data Not Found',
-                    'batterone': batter_one.get('name', 'Data Not Found'),
-                    'batsmanonerun': str(batter_one.get('runs', 'Data Not Found')),
-                    'batsmanoneball': f"({batter_one.get('balls', 'Data Not Found')})",
-                    'batsmanonesr': str(batter_one.get('sr', 'Data Not Found')),
-                    'battertwo': batter_two.get('name', 'Data Not Found'),
-                    'batsmantworun': str(batter_two.get('runs', 'Data Not Found')),
-                    'batsmantwoball': f"({batter_two.get('balls', 'Data Not Found')})",
-                    'batsmantwosr': str(batter_two.get('sr', 'Data Not Found')),
-                    'bowlerone': bowler_one.get('name', 'Data Not Found'),
-                    'bowleroneover': str(bowler_one.get('overs', 'Data Not Found')),
-                    'bowleronerun': str(bowler_one.get('runs', 'Data Not Found')),
-                    'bowleronewickers': str(bowler_one.get('wickets', 'Data Not Found')),
-                    'bowleroneeconomy': str(bowler_one.get('econ', 'Data Not Found')),
-                    'bowlertwo': bowler_two.get('name', 'Data Not Found'),
-                    'bowlertwoover': str(bowler_two.get('overs', 'Data Not Found')),
-                    'bowlertworun': str(bowler_two.get('runs', 'Data Not Found')),
-                    'bowlertwowickers': str(bowler_two.get('wickets', 'Data Not Found')),
-                    'bowlertwoeconomy': str(bowler_two.get('econ', 'Data Not Found'))
+                    'title': 'Data Not Found',
+                    'update': 'Data Not Found',
+                    'livescore': 'Data Not Found',
+                    'runrate': 'Data Not Found',
+                    'batterone': 'Data Not Found',
+                    'batsmanonerun': 'Data Not Found',
+                    'batsmanoneball': 'Data Not Found',
+                    'batsmanonesr': 'Data Not Found',
+                    'battertwo': 'Data Not Found',
+                    'batsmantworun': 'Data Not Found',
+                    'batsmantwoball': 'Data Not Found',
+                    'batsmantwosr': 'Data Not Found',
+                    'bowlerone': 'Data Not Found',
+                    'bowleroneover': 'Data Not Found',
+                    'bowleronerun': 'Data Not Found',
+                    'bowleronewickers': 'Data Not Found',
+                    'bowleroneeconomy': 'Data Not Found',
+                    'bowlertwo': 'Data Not Found',
+                    'bowlertwoover': 'Data Not Found',
+                    'bowlertworun': 'Data Not Found',
+                    'bowlertwowickers': 'Data Not Found',
+                    'bowlertwoeconomy': 'Data Not Found'
                 })
-            else:
-                return json_error_response()
+
+            batting = d.get('batting', [])
+            bowling = d.get('bowling', [])
+
+            batter_one = batting[0] if len(batting) > 0 else {}
+            batter_two = batting[1] if len(batting) > 1 else {}
+            bowler_one = bowling[0] if len(bowling) > 0 else {}
+            bowler_two = bowling[1] if len(bowling) > 1 else {}
+
+            current = d.get('current_score', {})
+            livescore = f"{current.get('team', '')} {current.get('runs', 0)}-{current.get('wickets', 0)} ({current.get('overs', 0)})" if current else 'Data Not Found'
+
+            return jsonify({
+                'title': d.get('title', 'Data Not Found'),
+                'update': d.get('status', 'Data Not Found'),
+                'livescore': livescore,
+                'runrate': f"CRR: {d.get('run_rate', 'Data Not Found')}" if d.get('run_rate') else 'Data Not Found',
+                'batterone': batter_one.get('name', 'Data Not Found'),
+                'batsmanonerun': str(batter_one.get('runs', 'Data Not Found')),
+                'batsmanoneball': f"({batter_one.get('balls', 'Data Not Found')})",
+                'batsmanonesr': str(batter_one.get('sr', 'Data Not Found')),
+                'battertwo': batter_two.get('name', 'Data Not Found'),
+                'batsmantworun': str(batter_two.get('runs', 'Data Not Found')),
+                'batsmantwoball': f"({batter_two.get('balls', 'Data Not Found')})",
+                'batsmantwosr': str(batter_two.get('sr', 'Data Not Found')),
+                'bowlerone': bowler_one.get('name', 'Data Not Found'),
+                'bowleroneover': str(bowler_one.get('overs', 'Data Not Found')),
+                'bowleronerun': str(bowler_one.get('runs', 'Data Not Found')),
+                'bowleronewickers': str(bowler_one.get('wickets', 'Data Not Found')),
+                'bowleroneeconomy': str(bowler_one.get('econ', 'Data Not Found')),
+                'bowlertwo': bowler_two.get('name', 'Data Not Found'),
+                'bowlertwoover': str(bowler_two.get('overs', 'Data Not Found')),
+                'bowlertworun': str(bowler_two.get('runs', 'Data Not Found')),
+                'bowlertwowickers': str(bowler_two.get('wickets', 'Data Not Found')),
+                'bowlertwoeconomy': str(bowler_two.get('econ', 'Data Not Found'))
+            })
         except (ValueError, TypeError):
             return json_error_response()
 
@@ -222,7 +255,8 @@ def create_app():
             
         try:
             match_id_int = int(match_id)
-            # Get the JSON data from the score_legacy endpoint
+            # Get the data from score_legacy first (it returns a dict, not a response)
+            # But score_legacy returns a Flask response, so we need to get its JSON
             response = score_legacy()
             data = response.get_json()
             
