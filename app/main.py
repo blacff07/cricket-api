@@ -3,18 +3,17 @@ import time
 from functools import wraps, lru_cache
 from flask import Flask, jsonify, request
 from flask_cors import CORS
-from markupsafe import escape
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from .config import Config
-from .utils import setup_logging, success_response, error_response, json_error_response
+from .utils import setup_logging, success_response, error_response
 from .scraper import fetch_page, extract_live_matches, extract_start_time_from_match_page
 
 # Setup logging
 setup_logging()
 logger = logging.getLogger(__name__)
 
-# Simple in-memory cache with proper function name preservation
+# Simple in-memory cache
 def cache_ttl(seconds=Config.CACHE_TTL):
     def decorator(func):
         cache = {}
@@ -55,17 +54,13 @@ def enrich_matches_with_start_times(matches):
             except Exception as e:
                 logger.error(f"Error fetching start time for match {mid}: {e}")
                 start_times[mid] = None
-    # Add start_time to each match
     for match in matches:
         match['start_time'] = start_times.get(match['id'])
     return matches
 
 def create_app():
-    """Application factory."""
     app = Flask(__name__)
     app.config.from_object(Config)
-
-    # Configure CORS
     CORS(app, origins=Config.CORS_ORIGINS)
 
     @app.route('/')
@@ -77,9 +72,7 @@ def create_app():
                 '/health',
                 '/live-matches',
                 '/matches/{id}/live',
-                '/matches/{id}/score',
-                '/score?id={id} (legacy)',
-                '/score/live (legacy)'
+                '/matches/{id}/score'
             ]
         }, message='Cricket API - Scrapes live data from Cricbuzz')
 
@@ -92,11 +85,8 @@ def create_app():
             'timestamp': int(time.time())
         })
 
-    # ------------------------------------------------------------------
-    # Main API endpoints (no /api/v1 prefix)
-    # ------------------------------------------------------------------
     @app.route('/live-matches', methods=['GET'])
-    @cache_ttl(30)  # Cache the full enriched list for 30 seconds
+    @cache_ttl(30)
     def live_matches():
         """Return all currently live matches with start times."""
         url = f"{Config.CRICBUZZ_URL}/"
@@ -110,10 +100,8 @@ def create_app():
                 return error_response(500, 'SCRAPER_FAILED', 'Failed to fetch live matches')
         
         matches = extract_live_matches(soup)
-        # Enrich with start times
         matches = enrich_matches_with_start_times(matches)
         
-        # Ensure only required fields are returned
         clean_matches = []
         for m in matches:
             clean_matches.append({
@@ -141,20 +129,19 @@ def create_app():
             else:
                 return error_response(500, 'SCRAPER_FAILED', 'Failed to fetch match data')
 
-        from .scraper import extract_match_data  # import here to avoid circular
+        from .scraper import extract_match_data
         data = extract_match_data(soup)
 
         if not data.get('title'):
             return error_response(404, 'MATCH_NOT_FOUND', f'No match found with id {match_id}')
 
-        # Build response exactly as per bot spec
         response_data = {
             'match_id': match_id,
             'title': data['title'],
             'teams': data.get('teams', []),
             'status': data['status'],
             'start_time': data.get('start_time'),
-            'current_score': data.get('current_score'),   # None if no batting team info
+            'current_score': data.get('current_score'),
             'run_rate': data.get('run_rate'),
             'batting': data.get('batting', []),
             'bowling': data.get('bowling', [])
@@ -165,106 +152,7 @@ def create_app():
     @cache_ttl(5)
     def match_score(match_id):
         """Return detailed scorecard for a specific match."""
-        # For now, return the same as live (full scorecard may be extended later)
         return match_live(match_id)
-
-    # ------------------------------------------------------------------
-    # Legacy endpoints (for backward compatibility)
-    # ------------------------------------------------------------------
-    @app.route('/live-matches-legacy', methods=['GET'])
-    def live_matches_legacy():
-        data = live_matches().get_json()
-        if data.get('success'):
-            return jsonify({'matches': data['data']['matches']})
-        return jsonify({'matches': []})
-
-    @app.route('/score', methods=['GET'])
-    def score_legacy():
-        match_id = escape(request.args.get('id', ''))
-        if not match_id:
-            return json_error_response()
-
-        try:
-            match_id_int = int(match_id)
-            response = match_score(match_id_int)
-            data = response.get_json()
-
-            if data.get('success'):
-                d = data['data']
-                # Convert back to legacy format
-                batting = d.get('batting', [])
-                bowling = d.get('bowling', [])
-
-                batter_one = batting[0] if len(batting) > 0 else {}
-                batter_two = batting[1] if len(batting) > 1 else {}
-                bowler_one = bowling[0] if len(bowling) > 0 else {}
-                bowler_two = bowling[1] if len(bowling) > 1 else {}
-
-                current = d.get('current_score', {})
-                livescore = f"{current.get('team', '')} {current.get('runs', 0)}-{current.get('wickets', 0)} ({current.get('overs', 0)})" if current else 'Data Not Found'
-
-                return jsonify({
-                    'title': d.get('title', 'Data Not Found'),
-                    'update': d.get('status', 'Data Not Found'),
-                    'livescore': livescore,
-                    'runrate': f"CRR: {d.get('run_rate', 'Data Not Found')}" if d.get('run_rate') else 'Data Not Found',
-                    'batterone': batter_one.get('name', 'Data Not Found'),
-                    'batsmanonerun': str(batter_one.get('runs', 'Data Not Found')),
-                    'batsmanoneball': f"({batter_one.get('balls', 'Data Not Found')})",
-                    'batsmanonesr': str(batter_one.get('sr', 'Data Not Found')),
-                    'battertwo': batter_two.get('name', 'Data Not Found'),
-                    'batsmantworun': str(batter_two.get('runs', 'Data Not Found')),
-                    'batsmantwoball': f"({batter_two.get('balls', 'Data Not Found')})",
-                    'batsmantwosr': str(batter_two.get('sr', 'Data Not Found')),
-                    'bowlerone': bowler_one.get('name', 'Data Not Found'),
-                    'bowleroneover': str(bowler_one.get('overs', 'Data Not Found')),
-                    'bowleronerun': str(bowler_one.get('runs', 'Data Not Found')),
-                    'bowleronewickers': str(bowler_one.get('wickets', 'Data Not Found')),
-                    'bowleroneeconomy': str(bowler_one.get('econ', 'Data Not Found')),
-                    'bowlertwo': bowler_two.get('name', 'Data Not Found'),
-                    'bowlertwoover': str(bowler_two.get('overs', 'Data Not Found')),
-                    'bowlertworun': str(bowler_two.get('runs', 'Data Not Found')),
-                    'bowlertwowickers': str(bowler_two.get('wickets', 'Data Not Found')),
-                    'bowlertwoeconomy': str(bowler_two.get('econ', 'Data Not Found'))
-                })
-            else:
-                return json_error_response()
-        except (ValueError, TypeError):
-            return json_error_response()
-
-    @app.route('/score/live', methods=['GET'])
-    def live_legacy():
-        data = score_legacy().get_json()
-        if data.get('title') != 'Data Not Found':
-            return jsonify({
-                'success': 'true',
-                'livescore': {
-                    'title': data['title'],
-                    'update': data['update'],
-                    'current': data['livescore'],
-                    'runrate': data['runrate'],
-                    'batsman': data['batterone'],
-                    'batsmanrun': data['batsmanonerun'],
-                    'ballsfaced': data['batsmanoneball'],
-                    'sr': data['batsmanonesr'],
-                    'batsmantwo': data['battertwo'],
-                    'batsmantworun': data['batsmantworun'],
-                    'batsmantwoballfaced': data['batsmantwoball'],
-                    'batsmantwosr': data['batsmantwosr'],
-                    'bowler': data['bowlerone'],
-                    'bowlerover': data['bowleroneover'],
-                    'bowlerruns': data['bowleronerun'],
-                    'bowlerwickets': data['bowleronewickers'],
-                    'bowlereconomy': data['bowleroneeconomy'],
-                    'bowlertwo': data['bowlertwo'],
-                    'bowlertwoover': data['bowlertwoover'],
-                    'bowlertworuns': data['bowlertworun'],
-                    'bowlertwowickets': data['bowlertwowickers'],
-                    'bowlertwoeconomy': data['bowlertwoeconomy']
-                }
-            })
-        else:
-            return jsonify({'success': 'false', 'livescore': {}})
 
     @app.errorhandler(404)
     def not_found(e):
@@ -277,7 +165,6 @@ def create_app():
 
     return app
 
-# For local development with `python -m app.main`
 if __name__ == '__main__':
     app = create_app()
     app.run(host=Config.HOST, port=Config.PORT, debug=True)
