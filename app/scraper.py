@@ -52,6 +52,7 @@ def extract_live_matches(soup):
             continue
         match_id = int(match.group(1))
         
+        # Try title attribute first, then link text
         title_attr = a.get('title', '')
         if title_attr:
             title = title_attr
@@ -60,6 +61,11 @@ def extract_live_matches(soup):
         if not title:
             continue
         
+        # Clean up title - remove extra whitespace and common prefixes
+        title = re.sub(r'\s+', ' ', title).strip()
+        title = title.replace('WATCH NOW', '').replace('T20I', '').strip()
+        
+        # Determine status
         lower_title = title.lower()
         if 'live' in lower_title:
             status = "Live"
@@ -68,13 +74,20 @@ def extract_live_matches(soup):
         else:
             status = "Upcoming"
         
+        # Extract teams more robustly
         teams = []
-        if ' vs ' in title:
-            teams_part = title.split(' vs ')[0]
-            teams = [teams_part.split(',')[0].strip()]
-            second_part = title.split(' vs ')[1]
-            teams.append(second_part.split(',')[0].strip())
+        # Try to find "Team vs Team" pattern
+        vs_match = re.search(r'([A-Za-z\s]+?)\s+vs\s+([A-Za-z\s]+)', title, re.I)
+        if vs_match:
+            team1 = vs_match.group(1).strip()
+            team2 = vs_match.group(2).strip()
+            # Take only the first word if it's a country name
+            team1 = team1.split()[0] if team1 else ''
+            team2 = team2.split()[0] if team2 else ''
+            if team1 and team2:
+                teams = [team1, team2]
         else:
+            # Fallback to code extraction
             codes = re.findall(r'\b[A-Z]{2,4}\b', title)
             if len(codes) >= 2:
                 teams = codes[:2]
@@ -87,7 +100,12 @@ def extract_live_matches(soup):
             'link': href
         })
     
-    unique = {m['id']: m for m in matches}
+    # Remove duplicates
+    unique = {}
+    for m in matches:
+        if m['id'] not in unique:
+            unique[m['id']] = m
+    
     result = list(unique.values())
     logger.info(f"Extracted {len(result)} unique matches")
     return result
