@@ -52,7 +52,6 @@ def extract_live_matches(soup):
             continue
         match_id = int(match.group(1))
         
-        # Try title attribute first, then link text
         title_attr = a.get('title', '')
         if title_attr:
             title = title_attr
@@ -61,11 +60,9 @@ def extract_live_matches(soup):
         if not title:
             continue
         
-        # Clean up title - remove extra whitespace and common prefixes
         title = re.sub(r'\s+', ' ', title).strip()
         title = title.replace('WATCH NOW', '').replace('T20I', '').strip()
         
-        # Determine status
         lower_title = title.lower()
         if 'live' in lower_title:
             status = "Live"
@@ -74,9 +71,7 @@ def extract_live_matches(soup):
         else:
             status = "Upcoming"
         
-        # Extract teams robustly
         teams = []
-        # Try to find "Team vs Team" pattern
         vs_match = re.search(r'([A-Za-z\s]+?)\s+vs\s+([A-Za-z\s]+)', title, re.I)
         if vs_match:
             team1 = vs_match.group(1).strip()
@@ -84,7 +79,6 @@ def extract_live_matches(soup):
             if team1 and team2:
                 teams = [team1, team2]
         else:
-            # Fallback to code extraction
             codes = re.findall(r'\b[A-Z]{2,4}\b', title)
             if len(codes) >= 2:
                 teams = codes[:2]
@@ -97,18 +91,13 @@ def extract_live_matches(soup):
             'link': href
         })
     
-    # Remove duplicates
-    unique = {}
-    for m in matches:
-        if m['id'] not in unique:
-            unique[m['id']] = m
-    
+    unique = {m['id']: m for m in matches}
     result = list(unique.values())
     logger.info(f"Extracted {len(result)} unique matches")
     return result
 
 # ----------------------------------------------------------------------
-# Detailed match data extraction (unchanged, working)
+# Detailed match data extraction with table isolation
 # ----------------------------------------------------------------------
 def extract_match_data(soup):
     """Extract detailed match data from a match scorecard page."""
@@ -128,8 +117,8 @@ def extract_match_data(soup):
     status = extract_match_status_from_match_page(soup) or 'Match Stats will Update Soon...'
     current_score = extract_current_score(soup)
     run_rate = extract_run_rate(soup)
-    batting = extract_batting(soup)
-    bowling = extract_bowling(soup)
+    batting = extract_batting(soup)      # Now isolated to batting table
+    bowling = extract_bowling(soup)      # Now isolated to bowling table
     start_time = extract_start_time_from_match_page(soup)
 
     return {
@@ -207,8 +196,22 @@ def extract_run_rate(soup):
     return None
 
 def extract_batting(soup):
+    """Extract batting list from the 'Batter' section."""
     batting = []
-    rows = soup.find_all('div', class_=lambda c: c and 'scorecard-bat-grid' in c)
+    # Find the "Batter" header
+    batter_header = soup.find('div', string=re.compile(r'Batter', re.I))
+    if not batter_header:
+        logger.warning("No 'Batter' header found, falling back to generic search")
+        # Fallback to old method
+        rows = soup.find_all('div', class_=lambda c: c and 'scorecard-bat-grid' in c)
+    else:
+        # Navigate to the container holding the batting table
+        container = batter_header.find_parent('div', class_=lambda c: c and 'cb-col' in c)
+        if not container:
+            container = batter_header.parent
+        # Find all rows with batting grid class inside this container
+        rows = container.find_all('div', class_=lambda c: c and 'scorecard-bat-grid' in c)
+    
     for row in rows:
         name_link = row.find('a', href=lambda h: h and '/profiles/' in h)
         if not name_link:
@@ -224,6 +227,9 @@ def extract_batting(soup):
             sixes = int(stat_divs[3].get_text(strip=True)) if stat_divs[3].get_text(strip=True).isdigit() else 0
             sr_text = stat_divs[4].get_text(strip=True)
             sr = float(sr_text) if sr_text.replace('.', '').isdigit() else 0.0
+            # Sanity check: ignore rows where runs are 0 but fours > 0 (likely a bowler row)
+            if runs == 0 and (fours > 0 or sixes > 0):
+                continue
             batting.append({
                 'name': name,
                 'runs': runs,
@@ -237,8 +243,19 @@ def extract_batting(soup):
     return batting
 
 def extract_bowling(soup):
+    """Extract bowling list from the 'Bowler' section."""
     bowling = []
-    rows = soup.find_all('div', class_=lambda c: c and 'scorecard-bowl-grid' in c)
+    # Find the "Bowler" header
+    bowler_header = soup.find('div', string=re.compile(r'Bowler', re.I))
+    if not bowler_header:
+        logger.warning("No 'Bowler' header found, falling back to generic search")
+        rows = soup.find_all('div', class_=lambda c: c and 'scorecard-bowl-grid' in c)
+    else:
+        container = bowler_header.find_parent('div', class_=lambda c: c and 'cb-col' in c)
+        if not container:
+            container = bowler_header.parent
+        rows = container.find_all('div', class_=lambda c: c and 'scorecard-bowl-grid' in c)
+    
     for row in rows:
         name_link = row.find('a', href=lambda h: h and '/profiles/' in h)
         if not name_link:
