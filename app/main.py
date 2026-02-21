@@ -1,13 +1,14 @@
 import logging
 import time
-from functools import wraps
+from functools import wraps, lru_cache
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from markupsafe import escape
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from .config import Config
 from .utils import setup_logging, success_response, error_response, json_error_response
-from .scraper import fetch_page, extract_live_matches, extract_match_data
+from .scraper import fetch_page, extract_live_matches, extract_start_time_from_match_page
 
 # Setup logging
 setup_logging()
@@ -29,6 +30,35 @@ def cache_ttl(seconds=Config.CACHE_TTL):
             return result
         return wrapper
     return decorator
+
+# Cache for start times per match ID
+@lru_cache(maxsize=128)
+def get_cached_start_time(match_id):
+    """Fetch and cache start time for a single match."""
+    url = f"{Config.CRICBUZZ_URL}/live-cricket-scores/{match_id}"
+    soup, error = fetch_page(url)
+    if soup is None:
+        logger.warning(f"Failed to fetch start time for match {match_id}: {error}")
+        return None
+    return extract_start_time_from_match_page(soup)
+
+def enrich_matches_with_start_times(matches):
+    """Enrich a list of matches with start times fetched concurrently."""
+    match_ids = [m['id'] for m in matches]
+    start_times = {}
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        future_to_id = {executor.submit(get_cached_start_time, mid): mid for mid in match_ids}
+        for future in as_completed(future_to_id):
+            mid = future_to_id[future]
+            try:
+                start_times[mid] = future.result()
+            except Exception as e:
+                logger.error(f"Error fetching start time for match {mid}: {e}")
+                start_times[mid] = None
+    # Add start_time to each match
+    for match in matches:
+        match['start_time'] = start_times.get(match['id'])
+    return matches
 
 def create_app():
     """Application factory."""
@@ -66,9 +96,9 @@ def create_app():
     # Main API endpoints (no /api/v1 prefix)
     # ------------------------------------------------------------------
     @app.route('/live-matches', methods=['GET'])
-    @cache_ttl(15)
+    @cache_ttl(30)  # Cache the full enriched list for 30 seconds
     def live_matches():
-        """Return all currently live matches."""
+        """Return all currently live matches with start times."""
         url = f"{Config.CRICBUZZ_URL}/"
         soup, error = fetch_page(url)
         if soup is None:
@@ -80,6 +110,9 @@ def create_app():
                 return error_response(500, 'SCRAPER_FAILED', 'Failed to fetch live matches')
         
         matches = extract_live_matches(soup)
+        # Enrich with start times
+        matches = enrich_matches_with_start_times(matches)
+        
         # Ensure only required fields are returned
         clean_matches = []
         for m in matches:
@@ -108,6 +141,7 @@ def create_app():
             else:
                 return error_response(500, 'SCRAPER_FAILED', 'Failed to fetch match data')
 
+        from .scraper import extract_match_data  # import here to avoid circular
         data = extract_match_data(soup)
 
         if not data.get('title'):
