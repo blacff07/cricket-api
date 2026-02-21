@@ -15,11 +15,18 @@ def fetch_page(url):
     """Fetch a page from Cricbuzz and return a BeautifulSoup object."""
     headers = {
         'User-Agent': get_random_agent(),
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
         'Cache-Control': 'no-cache'
     }
     try:
         resp = requests.get(url, headers=headers, timeout=Config.REQUEST_TIMEOUT)
         resp.raise_for_status()
+        # Log a snippet for debugging (optional)
+        logger.debug(f"Fetched {url}, status {resp.status_code}")
         return BeautifulSoup(resp.content, 'lxml'), None
     except requests.exceptions.Timeout:
         logger.error(f"Timeout fetching {url}")
@@ -29,6 +36,9 @@ def fetch_page(url):
         return None, "connection_error"
     except requests.exceptions.HTTPError as e:
         logger.error(f"HTTP error {e.response.status_code} fetching {url}")
+        # Log response snippet for debugging blocking
+        if e.response:
+            logger.error(f"Response snippet: {e.response.text[:200]}")
         return None, f"http_{e.response.status_code}"
     except Exception as e:
         logger.error(f"Unexpected error fetching {url}: {e}")
@@ -43,14 +53,25 @@ def extract_live_matches(soup):
     Returns a list of dicts with keys: id, teams, title, status, start_time.
     """
     matches = []
-    # Find all match blocks – adjust container class as needed
-    match_blocks = soup.find_all('div', class_='cb-mtch-blk')
-    if not match_blocks:
-        # Fallback: look for any match links in case the structure changed
-        match_blocks = soup.find_all('div', class_=lambda c: c and 'cb-col-100' in c and 'cb-col' in c)
+    # Try multiple possible containers
+    containers = []
+    # Primary: look for cb-mtch-blk directly
+    containers.extend(soup.find_all('div', class_='cb-mtch-blk'))
+    # Fallback: look for cb-col containers that might hold matches
+    if not containers:
+        containers = soup.find_all('div', class_=lambda c: c and 'cb-col-100' in c and 'cb-col' in c)
+        # Within these, find cb-mtch-blk or direct links
+        temp = []
+        for c in containers:
+            temp.extend(c.find_all('div', class_='cb-mtch-blk'))
+        containers = temp if temp else containers
 
-    for block in match_blocks:
+    for block in containers:
+        # If block is not a cb-mtch-blk, try to find the link differently
         link = block.find('a', href=True)
+        if not link and 'cb-mtch-blk' not in block.get('class', []):
+            # maybe the link is deeper
+            link = block.find('a', href=lambda h: h and '/live-cricket-scores/' in h)
         if not link:
             continue
         href = link['href']
@@ -59,12 +80,12 @@ def extract_live_matches(soup):
             continue
         match_id = int(match.group(1))
 
-        # Title – often inside link with class 'text-hvr-underline' or simply link text
+        # Title extraction – prefer title attribute or text inside span with 'text-hvr-underline'
         title_tag = link.find('span', class_=lambda c: c and 'text-hvr-underline' in c)
         if title_tag:
             title = title_tag.get_text(strip=True)
         else:
-            title = link.get_text(strip=True)
+            title = link.get('title', '') or link.get_text(strip=True)
 
         # Teams – parse from title (fallback)
         teams = []
@@ -73,13 +94,17 @@ def extract_live_matches(soup):
             if len(parts) >= 2:
                 teams = [parts[0].split(',')[0].strip(), parts[1].split(',')[0].strip()]
 
-        # Status – look for live/completed indicators
+        # Status – look for live/completed indicators in the block
         status = "Upcoming"
         if block.find('span', class_=lambda c: c and 'cb-plus-live-tag' in c):
             status = "Live"
         elif block.find('div', class_=lambda c: c and 'cb-text-complete' in c):
             status = "Completed"
         elif block.find('div', string=re.compile(r'won by|win by', re.I)):
+            status = "Completed"
+        elif 'live' in title.lower():
+            status = "Live"
+        elif any(w in title.lower() for w in ['won', 'complete', 'stumps', 'drawn', 'rain']):
             status = "Completed"
 
         # Start time – look for span with class 'sch-date' or similar
@@ -88,7 +113,6 @@ def extract_live_matches(soup):
         if time_elem:
             start_time = time_elem.get_text(strip=True)
         else:
-            # Try to find any element containing a time pattern
             time_pattern = re.compile(r'\d{1,2}:\d{2}\s*(AM|PM)|Today|Tomorrow', re.I)
             time_elem = block.find(string=time_pattern)
             if time_elem:
