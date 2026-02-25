@@ -11,14 +11,17 @@ class Config:
     # Cricbuzz base URL
     CRICBUZZ_URL = "https://www.cricbuzz.com"
 
+    # CORRECTED URLS
+    LIVE_MATCHES_URL = f"{CRICBUZZ_URL}/cricket-match/live-scores"  # For match list
+    SCORECARD_URL = f"{CRICBUZZ_URL}/live-cricket-scorecard"        # For match data (NOT /live-cricket-scores/)
+
     # Request timeout in seconds
     REQUEST_TIMEOUT = 10
 
     # Cache TTL in seconds for different endpoints
-    CACHE_TTL = 15  # For live matches list
-    # (match detail endpoints use their own decorator with 5 seconds)
+    CACHE_TTL = 15
 
-    # CORS allowed origins – update with your frontend domain(s)
+    # CORS allowed origins
     CORS_ORIGINS = [
         "https://blac-cricket-api.vercel.app",
         "http://localhost:3000",
@@ -31,10 +34,7 @@ class Config:
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0",
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7; rv:109.0) Gecko/20100101 Firefox/121.0",
-        "Mozilla/5.0 (X11; Linux i686; rv:109.0) Gecko/20100101 Firefox/121.0",
-        "Mozilla/5.0 (iPhone; CPU iPhone OS 17_1_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
-        "Mozilla/5.0 (iPad; CPU OS 17_1_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7; rv:109.0) Gecko/20100101 Firefox/121.0"
     ]
 
     # Host and port for local development
