@@ -40,7 +40,7 @@ def cache_ttl(seconds=Config.CACHE_TTL):
 @lru_cache(maxsize=128)
 def get_cached_start_time(match_id):
     """Fetch and cache start time for a single match."""
-    url = f"{Config.CRICBUZZ_URL}/live-cricket-scores/{match_id}"
+    url = f"{Config.CRICBUZZ_URL}/live-cricket-scorecard/{match_id}"
     soup, error = fetch_page(url)
     if soup is None:
         logger.warning(f"Failed to fetch start time for match {match_id}: {error}")
@@ -97,7 +97,7 @@ def create_app():
     @cache_ttl(30)
     def live_matches():
         """Return all currently live matches with start times."""
-        url = f"{Config.CRICBUZZ_URL}/"
+        url = f"{Config.LIVE_MATCHES_URL}"
         soup, error = fetch_page(url)
         if soup is None:
             if error == "timeout":
@@ -125,7 +125,9 @@ def create_app():
     @cache_ttl(5)
     def match_live(match_id):
         """Return live score for a specific match."""
-        url = f"{Config.CRICBUZZ_URL}/live-cricket-scores/{match_id}"
+        # CORRECT URL - use scorecard, not commentary
+        url = f"{Config.CRICBUZZ_URL}/live-cricket-scorecard/{match_id}"
+        
         soup, error = fetch_page(url)
         if soup is None:
             if error == "timeout":
@@ -162,7 +164,7 @@ def create_app():
         return match_live(match_id)
 
     # ------------------------------------------------------------------
-    # Legacy endpoints (FIXED - now use scraper directly)
+    # Legacy endpoints
     # ------------------------------------------------------------------
     @app.route('/score', methods=['GET'])
     def score_legacy():
@@ -175,8 +177,8 @@ def create_app():
         except ValueError:
             return json_error_response()
 
-        # Fetch the match page directly using the scraper
-        url = f"{Config.CRICBUZZ_URL}/live-cricket-scores/{match_id_int}"
+        # Use scorecard URL for legacy endpoint too
+        url = f"{Config.CRICBUZZ_URL}/live-cricket-scorecard/{match_id_int}"
         soup, error = fetch_page(url)
         
         # Fallback response when data cannot be fetched
