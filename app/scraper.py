@@ -117,8 +117,8 @@ def extract_match_data(soup):
     status = extract_match_status_from_match_page(soup) or 'Match Stats will Update Soon...'
     current_score = extract_current_score(soup)
     run_rate = extract_run_rate(soup)
-    batting = extract_batting(soup)      # Now isolated to batting table
-    bowling = extract_bowling(soup)      # Now isolated to bowling table
+    batting = extract_batting(soup)      # Now fixed
+    bowling = extract_bowling(soup)      # Now fixed
     start_time = extract_start_time_from_match_page(soup)
 
     return {
@@ -133,6 +133,7 @@ def extract_match_data(soup):
     }
 
 def extract_current_score(soup):
+    """Extract current score block: team, runs, wickets, overs."""
     score_block = soup.find('div', class_=lambda c: c and 'font-bold' in c and 'text-xl' in c and 'flex' in c)
     if not score_block:
         return None
@@ -177,6 +178,7 @@ def extract_current_score(soup):
     }
 
 def extract_run_rate(soup):
+    """Extract current run rate (CRR)."""
     crr_elem = soup.find('span', string=re.compile(r'CRR', re.I))
     if crr_elem:
         parent = crr_elem.parent
@@ -196,95 +198,152 @@ def extract_run_rate(soup):
     return None
 
 def extract_batting(soup):
-    """Extract batting list from the 'Batter' section."""
+    """Extract batting list from the scorecard - FIXED."""
     batting = []
-    # Find the "Batter" header
-    batter_header = soup.find('div', string=re.compile(r'Batter', re.I))
-    if not batter_header:
-        logger.warning("No 'Batter' header found, falling back to generic search")
-        # Fallback to old method
-        rows = soup.find_all('div', class_=lambda c: c and 'scorecard-bat-grid' in c)
-    else:
+    
+    # Method 1: Find by header "Batter"
+    batter_header = soup.find('div', string=re.compile(r'^Batter$', re.I))
+    if batter_header:
         # Navigate to the container holding the batting table
         container = batter_header.find_parent('div', class_=lambda c: c and 'cb-col' in c)
         if not container:
             container = batter_header.parent
+        
         # Find all rows with batting grid class inside this container
         rows = container.find_all('div', class_=lambda c: c and 'scorecard-bat-grid' in c)
-    
-    for row in rows:
-        name_link = row.find('a', href=lambda h: h and '/profiles/' in h)
-        if not name_link:
-            continue
-        name = name_link.get_text(strip=True).replace(' *', '').replace('†', '')
-        stat_divs = row.find_all('div', class_=lambda c: c and 'flex justify-center items-center' in c)
-        if len(stat_divs) < 5:
-            continue
-        try:
-            runs = int(stat_divs[0].get_text(strip=True)) if stat_divs[0].get_text(strip=True).isdigit() else 0
-            balls = int(stat_divs[1].get_text(strip=True)) if stat_divs[1].get_text(strip=True).isdigit() else 0
-            fours = int(stat_divs[2].get_text(strip=True)) if stat_divs[2].get_text(strip=True).isdigit() else 0
-            sixes = int(stat_divs[3].get_text(strip=True)) if stat_divs[3].get_text(strip=True).isdigit() else 0
-            sr_text = stat_divs[4].get_text(strip=True)
-            sr = float(sr_text) if sr_text.replace('.', '').isdigit() else 0.0
-            # Sanity check: ignore rows where runs are 0 but fours > 0 (likely a bowler row)
-            if runs == 0 and (fours > 0 or sixes > 0):
+        
+        for row in rows:
+            name_link = row.find('a', href=lambda h: h and '/profiles/' in h)
+            if not name_link:
                 continue
-            batting.append({
-                'name': name,
-                'runs': runs,
-                'balls': balls,
-                'fours': fours,
-                'sixes': sixes,
-                'sr': sr
-            })
-        except (ValueError, IndexError):
-            continue
+            
+            name = name_link.get_text(strip=True).replace(' *', '').replace('†', '')
+            
+            # Find all stat divs - there are usually 5: runs, balls, 4s, 6s, SR
+            stat_divs = row.find_all('div', class_=lambda c: c and 'flex justify-center items-center' in c)
+            
+            # If we don't have enough stat divs, try a different approach
+            if len(stat_divs) < 5:
+                # Try to find direct div children
+                stat_divs = row.find_all('div', recursive=False)
+                stat_divs = [d for d in stat_divs if d.get_text(strip=True) and not d.find('a')]
+            
+            if len(stat_divs) >= 5:
+                try:
+                    runs = int(stat_divs[0].get_text(strip=True)) if stat_divs[0].get_text(strip=True).isdigit() else 0
+                    balls = int(stat_divs[1].get_text(strip=True)) if stat_divs[1].get_text(strip=True).isdigit() else 0
+                    fours = int(stat_divs[2].get_text(strip=True)) if stat_divs[2].get_text(strip=True).isdigit() else 0
+                    sixes = int(stat_divs[3].get_text(strip=True)) if stat_divs[3].get_text(strip=True).isdigit() else 0
+                    sr_text = stat_divs[4].get_text(strip=True)
+                    sr = float(sr_text) if sr_text and sr_text.replace('.', '').replace('-', '').isdigit() else 0.0
+                    
+                    # Only add if at least runs or balls are positive (actual batting entry)
+                    if runs > 0 or balls > 0:
+                        batting.append({
+                            'name': name,
+                            'runs': runs,
+                            'balls': balls,
+                            'fours': fours,
+                            'sixes': sixes,
+                            'sr': sr
+                        })
+                except (ValueError, IndexError) as e:
+                    logger.debug(f"Error parsing batsman {name}: {e}")
+                    continue
+    
+    # Method 2: Fallback - look for any table-like structure with batting data
+    if not batting:
+        logger.debug("Falling back to generic batting search")
+        # Look for divs containing batsman names and stats
+        profile_links = soup.find_all('a', href=lambda h: h and '/profiles/' in h)
+        for link in profile_links:
+            # Find the parent row that might contain stats
+            parent = link.find_parent('div', class_=lambda c: c and 'cb-col' in c)
+            if parent:
+                # Look for stat divs
+                stat_divs = parent.find_all('div', class_=lambda c: c and 'text-right' in c)
+                if len(stat_divs) >= 4:
+                    name = link.get_text(strip=True).replace(' *', '').replace('†', '')
+                    try:
+                        runs = int(stat_divs[0].get_text(strip=True)) if stat_divs[0].get_text(strip=True).isdigit() else 0
+                        balls = int(stat_divs[1].get_text(strip=True)) if stat_divs[1].get_text(strip=True).isdigit() else 0
+                        fours = int(stat_divs[2].get_text(strip=True)) if stat_divs[2].get_text(strip=True).isdigit() else 0
+                        sixes = int(stat_divs[3].get_text(strip=True)) if stat_divs[3].get_text(strip=True).isdigit() else 0
+                        
+                        if runs > 0 or balls > 0:
+                            sr = (runs / balls * 100) if balls > 0 else 0.0
+                            batting.append({
+                                'name': name,
+                                'runs': runs,
+                                'balls': balls,
+                                'fours': fours,
+                                'sixes': sixes,
+                                'sr': round(sr, 2)
+                            })
+                    except (ValueError, IndexError):
+                        continue
+    
+    logger.debug(f"Extracted {len(batting)} batsmen")
     return batting
 
 def extract_bowling(soup):
-    """Extract bowling list from the 'Bowler' section."""
+    """Extract bowling list from the scorecard - FIXED."""
     bowling = []
-    # Find the "Bowler" header
-    bowler_header = soup.find('div', string=re.compile(r'Bowler', re.I))
-    if not bowler_header:
-        logger.warning("No 'Bowler' header found, falling back to generic search")
-        rows = soup.find_all('div', class_=lambda c: c and 'scorecard-bowl-grid' in c)
-    else:
+    
+    # Method 1: Find by header "Bowler"
+    bowler_header = soup.find('div', string=re.compile(r'^Bowler$', re.I))
+    if bowler_header:
+        # Navigate to the container holding the bowling table
         container = bowler_header.find_parent('div', class_=lambda c: c and 'cb-col' in c)
         if not container:
             container = bowler_header.parent
+        
+        # Find all rows with bowling grid class inside this container
         rows = container.find_all('div', class_=lambda c: c and 'scorecard-bowl-grid' in c)
+        
+        for row in rows:
+            name_link = row.find('a', href=lambda h: h and '/profiles/' in h)
+            if not name_link:
+                continue
+            
+            name = name_link.get_text(strip=True)
+            
+            # Find all stat divs
+            stat_divs = row.find_all('div', class_=lambda c: c and 'flex justify-center items-center' in c)
+            
+            if len(stat_divs) < 5:
+                stat_divs = row.find_all('div', recursive=False)
+                stat_divs = [d for d in stat_divs if d.get_text(strip=True) and not d.find('a')]
+            
+            if len(stat_divs) >= 5:
+                try:
+                    overs_text = stat_divs[0].get_text(strip=True)
+                    overs = float(overs_text) if overs_text and overs_text.replace('.', '').isdigit() else 0.0
+                    maidens = int(stat_divs[1].get_text(strip=True)) if stat_divs[1].get_text(strip=True).isdigit() else 0
+                    runs = int(stat_divs[2].get_text(strip=True)) if stat_divs[2].get_text(strip=True).isdigit() else 0
+                    wickets = int(stat_divs[3].get_text(strip=True)) if stat_divs[3].get_text(strip=True).isdigit() else 0
+                    econ_text = stat_divs[4].get_text(strip=True)
+                    econ = float(econ_text) if econ_text and econ_text.replace('.', '').isdigit() else 0.0
+                    
+                    # Only add if there's bowling data
+                    if overs > 0 or wickets > 0 or runs > 0:
+                        bowling.append({
+                            'name': name,
+                            'overs': overs,
+                            'maidens': maidens,
+                            'runs': runs,
+                            'wickets': wickets,
+                            'econ': econ
+                        })
+                except (ValueError, IndexError) as e:
+                    logger.debug(f"Error parsing bowler {name}: {e}")
+                    continue
     
-    for row in rows:
-        name_link = row.find('a', href=lambda h: h and '/profiles/' in h)
-        if not name_link:
-            continue
-        name = name_link.get_text(strip=True)
-        stat_divs = row.find_all('div', class_=lambda c: c and 'flex justify-center items-center' in c)
-        if len(stat_divs) < 5:
-            continue
-        try:
-            overs_text = stat_divs[0].get_text(strip=True)
-            overs = float(overs_text) if overs_text.replace('.', '').isdigit() else 0.0
-            maidens = int(stat_divs[1].get_text(strip=True)) if stat_divs[1].get_text(strip=True).isdigit() else 0
-            runs = int(stat_divs[2].get_text(strip=True)) if stat_divs[2].get_text(strip=True).isdigit() else 0
-            wickets = int(stat_divs[3].get_text(strip=True)) if stat_divs[3].get_text(strip=True).isdigit() else 0
-            econ_text = stat_divs[4].get_text(strip=True)
-            econ = float(econ_text) if econ_text.replace('.', '').isdigit() else 0.0
-            bowling.append({
-                'name': name,
-                'overs': overs,
-                'maidens': maidens,
-                'runs': runs,
-                'wickets': wickets,
-                'econ': econ
-            })
-        except (ValueError, IndexError):
-            continue
+    logger.debug(f"Extracted {len(bowling)} bowlers")
     return bowling
 
 def extract_start_time_from_match_page(soup):
+    """Extract start time from the match facts section."""
     start_time = None
     date_time_span = soup.find('span', string=re.compile(r'Date & Time:', re.I))
     if date_time_span:
@@ -299,6 +358,7 @@ def extract_start_time_from_match_page(soup):
     return start_time
 
 def extract_match_status_from_match_page(soup):
+    """Extract the true match status from a match page."""
     def is_valid_status(text):
         if not text or len(text) > 60:
             return False
