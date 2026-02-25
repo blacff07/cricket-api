@@ -2,6 +2,7 @@ import re
 import random
 import requests
 import logging
+import json
 from bs4 import BeautifulSoup
 from .config import Config
 
@@ -30,110 +31,121 @@ def fetch_page(url):
         return None, "connection_error"
     except requests.exceptions.HTTPError as e:
         logger.error(f"HTTP error {e.response.status_code} fetching {url}")
-        if e.response:
-            logger.error(f"Response snippet: {e.response.text[:200]}")
         return None, f"http_{e.response.status_code}"
     except Exception as e:
         logger.error(f"Unexpected error fetching {url}: {e}")
         return None, "unknown"
 
+# ----------------------------------------------------------------------
+# Match list extraction from CORRECT source
+# ----------------------------------------------------------------------
 def extract_live_matches(soup):
-    """Extract live matches from the Cricbuzz homepage using anchor tags."""
+    """Extract live matches from Cricbuzz live scores page."""
     matches = []
-    all_links = soup.find_all('a', href=True)
-    logger.debug(f"Found {len(all_links)} total links on the page")
     
-    for a in all_links:
-        href = a['href']
-        if '/live-cricket-scores/' not in href:
+    # Find all match blocks
+    match_blocks = soup.find_all('div', class_='cb-lv-main')
+    
+    for block in match_blocks:
+        # Extract match link to get ID
+        link = block.find('a', href=True)
+        if not link:
             continue
-        match = re.search(r'/live-cricket-scores/(\d+)', href)
+            
+        href = link['href']
+        # Extract ID from scorecard link (not commentary)
+        match = re.search(r'/live-cricket-scorecard/(\d+)', href)
+        if not match:
+            # Try alternate pattern
+            match = re.search(r'/(\d+)/', href)
         if not match:
             continue
+            
         match_id = int(match.group(1))
         
-        title_attr = a.get('title', '')
-        if title_attr:
-            title = title_attr
-        else:
-            title = a.get_text(strip=True)
-        if not title:
-            continue
+        # Extract title from header
+        title_elem = block.find('h3', class_='cb-lv-scr-mtch-hdr')
+        title = title_elem.get_text(strip=True) if title_elem else ''
         
-        title = re.sub(r'\s+', ' ', title).strip()
-        title = title.replace('WATCH NOW', '').replace('T20I', '').strip()
-        
-        lower_title = title.lower()
-        if 'live' in lower_title:
-            status = "Live"
-        elif any(word in lower_title for word in ['won', 'complete', 'stumps', 'drawn', 'rain']):
-            status = "Completed"
-        else:
-            status = "Upcoming"
-        
+        # Extract teams from title
         teams = []
-        vs_match = re.search(r'([A-Za-z\s]+?)\s+vs\s+([A-Za-z\s]+)', title, re.I)
-        if vs_match:
-            team1 = vs_match.group(1).strip()
-            team2 = vs_match.group(2).strip()
-            if team1 and team2:
-                teams = [team1, team2]
+        if ' vs ' in title:
+            parts = title.split(' vs ')
+            teams = [parts[0].strip(), parts[1].split(',')[0].strip()]
+        
+        # Determine status
+        status = "Upcoming"
+        status_elem = block.find('div', class_='cb-text-live')
+        if status_elem:
+            status = "Live"
         else:
-            codes = re.findall(r'\b[A-Z]{2,4}\b', title)
-            if len(codes) >= 2:
-                teams = codes[:2]
+            complete_elem = block.find('div', class_='cb-text-complete')
+            if complete_elem:
+                status = "Completed"
+        
+        # Extract start time/venue
+        start_time = None
+        time_elem = block.find('div', class_='cb-font-12')
+        if time_elem:
+            time_text = time_elem.get_text(strip=True)
+            # Extract time portion
+            time_match = re.search(r'\d{1,2}:\d{2}\s*(AM|PM)', time_text, re.I)
+            if time_match:
+                start_time = time_match.group(0)
+            else:
+                start_time = time_text
         
         matches.append({
             'id': match_id,
             'teams': teams,
             'title': title,
             'status': status,
-            'link': href
+            'start_time': start_time
         })
     
-    unique = {m['id']: m for m in matches}
-    result = list(unique.values())
-    logger.info(f"Extracted {len(result)} unique matches")
-    return result
+    # Remove duplicates
+    unique = {}
+    for m in matches:
+        if m['id'] not in unique:
+            unique[m['id']] = m
+    
+    logger.info(f"Extracted {len(unique)} unique matches")
+    return list(unique.values())
 
 # ----------------------------------------------------------------------
-# Detailed match data extraction - SIMPLIFIED VERSION
+# Scorecard data extraction from CORRECT source
 # ----------------------------------------------------------------------
 def extract_match_data(soup):
-    """Extract detailed match data from a match scorecard page."""
-    # Title
-    title_tag = soup.find('h1')
-    if title_tag:
-        title = title_tag.get_text(strip=True)
-        title = title.replace(', Commentary', '').replace(' - Scorecard', '').strip()
-    else:
-        title = None
-
-    # Teams from title
+    """Extract detailed match data from scorecard page."""
+    
+    # Extract title from header
+    title_elem = soup.find('h1', class_='cb-nav-hdr')
+    title = title_elem.get_text(strip=True) if title_elem else None
+    
+    # Extract teams from title
     teams = []
     if title and ' vs ' in title:
         parts = title.split(' vs ')
-        if len(parts) >= 2:
-            teams = [parts[0].split(',')[0].strip(), parts[1].split(',')[0].strip()]
-
-    # Status
-    status = extract_match_status_from_match_page(soup) or 'Match Stats will Update Soon...'
+        teams = [parts[0].strip(), parts[1].split(',')[0].strip()]
     
-    # Current score
+    # Extract status
+    status = extract_status(soup)
+    
+    # Extract current score
     current_score = extract_current_score(soup)
     
-    # Run rate
+    # Extract run rate
     run_rate = extract_run_rate(soup)
     
-    # Batting - SIMPLIFIED
-    batting = extract_batting_simple(soup)
+    # Extract batting
+    batting = extract_batting(soup)
     
-    # Bowling - SIMPLIFIED
-    bowling = extract_bowling_simple(soup)
+    # Extract bowling
+    bowling = extract_bowling(soup)
     
-    # Start time
-    start_time = extract_start_time_from_match_page(soup)
-
+    # Extract start time
+    start_time = extract_start_time(soup)
+    
     return {
         'title': title,
         'teams': teams,
@@ -145,265 +157,176 @@ def extract_match_data(soup):
         'bowling': bowling
     }
 
-def extract_current_score(soup):
-    """Extract current score block: team, runs, wickets, overs."""
-    # Look for the score block with team name
-    score_blocks = soup.find_all('div', class_=lambda c: c and 'cb-col-100' in c and 'cb-col' in c)
+def extract_status(soup):
+    """Extract match status from scorecard."""
+    # Check for complete status
+    complete_div = soup.find('div', class_='cb-text-complete')
+    if complete_div:
+        return complete_div.get_text(strip=True)
     
-    for block in score_blocks:
-        # Look for a div with team name
-        team_div = block.find('div', class_=lambda c: c and 'cb-col-40' in c)
-        if not team_div:
-            continue
-            
-        team = team_div.get_text(strip=True)
-        if not team:
-            continue
-            
-        # Look for score in the same block
-        score_divs = block.find_all('div', class_=lambda c: c and 'cb-col-20' in c)
-        if len(score_divs) >= 2:
-            runs_wickets = score_divs[0].get_text(strip=True)
-            overs = score_divs[1].get_text(strip=True).strip('()')
-            
-            # Parse runs and wickets
-            runs = 0
-            wickets = 0
-            if '-' in runs_wickets:
-                parts = runs_wickets.split('-')
-                try:
-                    runs = int(parts[0]) if parts[0].isdigit() else 0
-                except:
-                    runs = 0
-                try:
-                    wickets = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
-                except:
-                    wickets = 0
-            
-            overs_float = 0.0
-            try:
-                overs_float = float(overs) if overs.replace('.', '').isdigit() else 0.0
-            except:
-                pass
-            
-            return {
-                'team': team,
-                'runs': runs,
-                'wickets': wickets,
-                'overs': overs_float
-            }
+    # Check for live status
+    live_div = soup.find('div', class_='cb-text-live')
+    if live_div:
+        return live_div.get_text(strip=True)
+    
+    # Check for preview
+    preview_div = soup.find('div', class_='cb-text-preview')
+    if preview_div:
+        return preview_div.get_text(strip=True)
+    
+    return "Match Stats will Update Soon..."
+
+def extract_current_score(soup):
+    """Extract current score from innings header."""
+    # Find innings header row
+    header = soup.find('div', class_='cb-scrd-hdr-rw')
+    if not header:
+        return None
+    
+    # Extract score text (e.g., "SL 145-3 (17.2)")
+    score_text = header.get_text(strip=True)
+    
+    # Parse using regex
+    match = re.search(r'([A-Z]+)\s+(\d+)-(\d+)\s*\((\d+\.?\d*)\)', score_text)
+    if match:
+        return {
+            'team': match.group(1),
+            'runs': int(match.group(2)),
+            'wickets': int(match.group(3)),
+            'overs': float(match.group(4))
+        }
     
     return None
 
 def extract_run_rate(soup):
-    """Extract current run rate (CRR)."""
-    crr_elem = soup.find(string=re.compile(r'CRR:', re.I))
-    if crr_elem:
-        # Get the parent and extract number
-        parent = crr_elem.parent
-        if parent:
-            text = parent.get_text()
-            match = re.search(r'CRR:\s*(\d+\.?\d*)', text, re.I)
-            if match:
-                try:
-                    return float(match.group(1))
-                except:
-                    pass
+    """Extract run rate from scorecard."""
+    # Look for RR text
+    rr_text = soup.find(string=re.compile(r'RR:\s*(\d+\.?\d*)'))
+    if rr_text:
+        match = re.search(r'RR:\s*(\d+\.?\d*)', rr_text)
+        if match:
+            return float(match.group(1))
     return None
 
-def extract_batting_simple(soup):
-    """Extract batting list - SIMPLIFIED version."""
+def extract_batting(soup):
+    """Extract batting stats from scorecard."""
     batting = []
     
-    # Find all rows that might contain batting data
-    # Look for divs with player profile links
-    profile_links = soup.find_all('a', href=lambda h: h and '/profiles/' in h)
+    # Find all batting rows
+    batting_rows = soup.find_all('div', class_='cb-scrd-itms')
     
-    for link in profile_links:
-        # Get the parent row
-        row = link.find_parent('div', class_=lambda c: c and 'cb-col' in c)
-        if not row:
+    for row in batting_rows:
+        # Skip if this is a bowler row (has bowler stats)
+        if row.find(string=re.compile(r'Overs|Maidens|Runs|Wkts|Econ')):
             continue
             
-        # Get player name
-        name = link.get_text(strip=True).replace(' *', '').replace('†', '')
+        # Get all cells
+        cells = row.find_all('div', class_=lambda c: c and 'cb-col' in c)
+        if len(cells) < 6:
+            continue
         
-        # Look for statistics in the row
-        stats = []
-        for stat_div in row.find_all('div', class_=lambda c: c and 'text-right' in c):
-            stat_text = stat_div.get_text(strip=True)
-            if stat_text and stat_text.replace('.', '').isdigit():
-                stats.append(stat_text)
+        # Extract name (first cell)
+        name_link = cells[0].find('a')
+        name = name_link.get_text(strip=True) if name_link else cells[0].get_text(strip=True)
+        name = name.replace(' *', '').replace('†', '').strip()
         
-        # If we have at least 2 stats (runs and balls)
-        if len(stats) >= 2:
-            try:
-                runs = int(stats[0]) if stats[0].isdigit() else 0
-                balls = int(stats[1]) if len(stats) > 1 and stats[1].isdigit() else 0
-                fours = int(stats[2]) if len(stats) > 2 and stats[2].isdigit() else 0
-                sixes = int(stats[3]) if len(stats) > 3 and stats[3].isdigit() else 0
-                
-                # Calculate SR if not provided
-                sr = (runs / balls * 100) if balls > 0 else 0.0
-                
-                if runs > 0 or balls > 0:
-                    batting.append({
-                        'name': name,
-                        'runs': runs,
-                        'balls': balls,
-                        'fours': fours,
-                        'sixes': sixes,
-                        'sr': round(sr, 2)
-                    })
-            except (ValueError, IndexError):
-                continue
+        # Extract stats
+        try:
+            runs = int(cells[1].get_text(strip=True)) if cells[1].get_text(strip=True).isdigit() else 0
+            balls = int(cells[2].get_text(strip=True)) if cells[2].get_text(strip=True).isdigit() else 0
+            fours = int(cells[3].get_text(strip=True)) if cells[3].get_text(strip=True).isdigit() else 0
+            sixes = int(cells[4].get_text(strip=True)) if cells[4].get_text(strip=True).isdigit() else 0
+            sr_text = cells[5].get_text(strip=True)
+            sr = float(sr_text) if sr_text.replace('.', '').isdigit() else 0.0
+            
+            if runs > 0 or balls > 0:
+                batting.append({
+                    'name': name,
+                    'runs': runs,
+                    'balls': balls,
+                    'fours': fours,
+                    'sixes': sixes,
+                    'sr': sr
+                })
+        except (ValueError, IndexError):
+            continue
     
-    # Remove duplicates (same player might appear multiple times)
-    unique_batting = []
-    seen_names = set()
+    # Remove duplicates and return first 11
+    unique = []
+    seen = set()
     for b in batting:
-        if b['name'] not in seen_names:
-            seen_names.add(b['name'])
-            unique_batting.append(b)
+        if b['name'] not in seen:
+            seen.add(b['name'])
+            unique.append(b)
     
-    logger.debug(f"Extracted {len(unique_batting)} batsmen")
-    return unique_batting
+    return unique
 
-def extract_bowling_simple(soup):
-    """Extract bowling list - SIMPLIFIED version."""
+def extract_bowling(soup):
+    """Extract bowling stats from scorecard."""
     bowling = []
     
-    # Look for bowling tables - they often have "Bowler" header
-    bowler_headers = soup.find_all(string=re.compile(r'Bowler', re.I))
+    # Find bowling section (usually after batting)
+    # Look for rows that contain bowling stats
+    all_rows = soup.find_all('div', class_='cb-scrd-itms')
     
-    for header in bowler_headers:
-        # Get the table container
-        container = header.find_parent('div', class_=lambda c: c and 'cb-col' in c)
-        if not container:
+    for row in all_rows:
+        # Check if this is a bowling row (contains overs)
+        cells = row.find_all('div', class_=lambda c: c and 'cb-col' in c)
+        if len(cells) < 6:
+            continue
+        
+        # Check if first cell has a bowler name
+        name_link = cells[0].find('a', href=lambda h: h and '/profiles/' in h)
+        if not name_link:
             continue
             
-        # Find all rows with bowling data
-        rows = container.find_all('div', class_=lambda c: c and 'cb-col' in c)
+        name = name_link.get_text(strip=True)
         
-        for row in rows:
-            # Look for player profile link
-            link = row.find('a', href=lambda h: h and '/profiles/' in h)
-            if not link:
+        # Verify this is a bowling row by checking stats format
+        try:
+            overs_text = cells[1].get_text(strip=True)
+            if not overs_text.replace('.', '').isdigit():
                 continue
                 
-            name = link.get_text(strip=True)
+            overs = float(overs_text)
+            maidens = int(cells[2].get_text(strip=True)) if cells[2].get_text(strip=True).isdigit() else 0
+            runs = int(cells[3].get_text(strip=True)) if cells[3].get_text(strip=True).isdigit() else 0
+            wickets = int(cells[4].get_text(strip=True)) if cells[4].get_text(strip=True).isdigit() else 0
+            econ_text = cells[5].get_text(strip=True)
+            econ = float(econ_text) if econ_text.replace('.', '').isdigit() else 0.0
             
-            # Look for statistics
-            stats = []
-            for stat_div in row.find_all('div', class_=lambda c: c and 'text-right' in c):
-                stat_text = stat_div.get_text(strip=True)
-                if stat_text and (stat_text.isdigit() or stat_text.replace('.', '').isdigit()):
-                    stats.append(stat_text)
-            
-            # Bowling stats: overs, maidens, runs, wickets, econ
-            if len(stats) >= 5:
-                try:
-                    overs = float(stats[0]) if stats[0].replace('.', '').isdigit() else 0.0
-                    maidens = int(stats[1]) if stats[1].isdigit() else 0
-                    runs = int(stats[2]) if stats[2].isdigit() else 0
-                    wickets = int(stats[3]) if stats[3].isdigit() else 0
-                    econ = float(stats[4]) if stats[4].replace('.', '').isdigit() else 0.0
-                    
-                    if overs > 0 or wickets > 0 or runs > 0:
-                        bowling.append({
-                            'name': name,
-                            'overs': overs,
-                            'maidens': maidens,
-                            'runs': runs,
-                            'wickets': wickets,
-                            'econ': econ
-                        })
-                except (ValueError, IndexError):
-                    continue
+            if overs > 0 or wickets > 0:
+                bowling.append({
+                    'name': name,
+                    'overs': overs,
+                    'maidens': maidens,
+                    'runs': runs,
+                    'wickets': wickets,
+                    'econ': econ
+                })
+        except (ValueError, IndexError):
+            continue
     
-    # Remove duplicates
-    unique_bowling = []
-    seen_names = set()
-    for b in bowling:
-        if b['name'] not in seen_names:
-            seen_names.add(b['name'])
-            unique_bowling.append(b)
+    return bowling
+
+def extract_start_time(soup):
+    """Extract start time from match info section."""
+    # Look for time in info section
+    info_items = soup.find_all('div', class_='cb-col')
     
-    logger.debug(f"Extracted {len(unique_bowling)} bowlers")
-    return unique_bowling
-
-def extract_start_time_from_match_page(soup):
-    """Extract start time from the match facts section."""
-    start_time = None
-    date_time_span = soup.find('span', string=re.compile(r'Date & Time:', re.I))
-    if date_time_span:
-        parent = date_time_span.find_parent()
-        if parent:
-            full_text = parent.get_text(strip=True)
-            start_time = full_text.replace('Date & Time:', '').strip()
-    if not start_time:
-        time_elem = soup.find(string=re.compile(r'\d{1,2}:\d{2}\s*(AM|PM)', re.I))
-        if time_elem:
-            start_time = time_elem.strip()
-    return start_time
-
-def extract_match_status_from_match_page(soup):
-    """Extract the true match status from a match page."""
-    def is_valid_status(text):
-        if not text or len(text) > 60:
-            return False
-        bad_patterns = [
-            'short ball', 'full toss', 'driven', 'pulled', 'cut', 'swept',
-            'over mid-wicket', 'long on', 'long off', 'covers', 'point',
-            'Schedule', 'Archives', 'Rankings', 'Videos', 'More'
-        ]
-        lower_text = text.lower()
-        for pattern in bad_patterns:
-            if pattern in lower_text:
-                return False
-        status_keywords = ['won', 'live', 'stumps', 'innings', 'rain',
-                          'abandoned', 'opt', 'target', 'need', 'required', 'break']
-        return any(kw in lower_text for kw in status_keywords)
-
-    # 1️⃣ Live badge
-    live_badge = soup.find('span', class_=lambda c: c and 'cb-plus-live-tag' in c)
-    if live_badge:
-        return "Live"
-
-    # 2️⃣ Look for status in the top bar
-    top_bar = soup.find('div', class_=lambda c: c and 'cb-nav-bar' in c)
-    if top_bar:
-        for a in top_bar.find_all('a'):
-            text = a.get_text(strip=True)
-            if is_valid_status(text):
-                return text
-
-    # 3️⃣ Look for result text
-    result_elem = soup.find('div', string=re.compile(r'won by \d+ (run|wicket)', re.I))
-    if result_elem:
-        candidate = result_elem.get_text(strip=True)
-        if is_valid_status(candidate):
-            return candidate
-
-    # 4️⃣ Toss text
-    toss_elem = soup.find('div', string=re.compile(r'opt to (bat|field)', re.I))
-    if toss_elem:
-        candidate = toss_elem.get_text(strip=True)
-        if is_valid_status(candidate):
-            return candidate
-
-    # 5️⃣ Innings break / stumps / rain
-    status_keywords = ['innings break', 'stumps', 'rain', 'abandoned', 'lunch', 'tea']
-    for kw in status_keywords:
-        elem = soup.find('div', string=re.compile(kw, re.I))
-        if elem:
-            candidate = elem.get_text(strip=True)
-            if is_valid_status(candidate):
-                return candidate
-
-    # 6️⃣ Preview
-    preview_div = soup.find('div', class_=lambda c: c and 'cb-text-preview' in c)
-    if preview_div:
-        return "Preview"
-
+    for item in info_items:
+        text = item.get_text()
+        if 'Time' in text or 'LOCAL' in text:
+            # Extract time pattern
+            match = re.search(r'(\d{1,2}:\d{2}\s*(?:AM|PM).*?LOCAL)', text, re.I)
+            if match:
+                return match.group(1)
+    
     return None
+
+# ----------------------------------------------------------------------
+# Start time extraction (for live matches enrichment)
+# ----------------------------------------------------------------------
+def extract_start_time_from_match_page(soup):
+    """Alias for extract_start_time to maintain compatibility."""
+    return extract_start_time(soup)
