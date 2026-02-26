@@ -40,31 +40,47 @@ def fetch_page(url):
 # Match list extraction from CORRECT source
 # ----------------------------------------------------------------------
 def extract_live_matches(soup):
-    """Extract live matches from Cricbuzz live scores page."""
+    """Extract live matches from Cricbuzz live scores page with multiple fallbacks."""
     matches = []
     
-    # Find all match blocks
-    match_blocks = soup.find_all('div', class_='cb-lv-main')
+    # Try multiple possible containers
+    match_blocks = []
+    
+    # Method 1: Current Cricbuzz structure (most common)
+    match_blocks = soup.find_all('div', class_='cb-mtch-blk')
+    
+    # Method 2: Alternative structure
+    if not match_blocks:
+        match_blocks = soup.find_all('div', class_='cb-lv-main')
+    
+    # Method 3: Generic match cards
+    if not match_blocks:
+        match_blocks = soup.find_all('div', class_=lambda c: c and 'cb-col' in c and 'cb-col-100' in c)
+    
+    # Method 4: Look for any div containing match links
+    if not match_blocks:
+        # Find all links to scorecards and work backwards
+        scorecard_links = soup.find_all('a', href=lambda h: h and '/live-cricket-scorecard/' in h)
+        for link in scorecard_links:
+            parent_block = link.find_parent('div', class_=lambda c: c and 'cb-col' in c)
+            if parent_block and parent_block not in match_blocks:
+                match_blocks.append(parent_block)
     
     for block in match_blocks:
-        # Extract match link to get ID
-        link = block.find('a', href=True)
+        # Find the main match link
+        link = block.find('a', href=lambda h: h and '/live-cricket-scorecard/' in h)
         if not link:
             continue
             
         href = link['href']
-        # Extract ID from scorecard link (not commentary)
         match = re.search(r'/live-cricket-scorecard/(\d+)', href)
-        if not match:
-            # Try alternate pattern
-            match = re.search(r'/(\d+)/', href)
         if not match:
             continue
             
         match_id = int(match.group(1))
         
-        # Extract title from header
-        title_elem = block.find('h3', class_='cb-lv-scr-mtch-hdr')
+        # Extract title
+        title_elem = block.find('h3') or block.find('h2') or block.find('h4')
         title = title_elem.get_text(strip=True) if title_elem else ''
         
         # Extract teams from title
@@ -75,25 +91,16 @@ def extract_live_matches(soup):
         
         # Determine status
         status = "Upcoming"
-        status_elem = block.find('div', class_='cb-text-live')
-        if status_elem:
+        if block.find('span', class_=lambda c: c and 'live' in c):
             status = "Live"
-        else:
-            complete_elem = block.find('div', class_='cb-text-complete')
-            if complete_elem:
-                status = "Completed"
+        elif block.find('div', string=re.compile(r'won|complete', re.I)):
+            status = "Completed"
         
-        # Extract start time/venue
+        # Extract time
         start_time = None
-        time_elem = block.find('div', class_='cb-font-12')
+        time_elem = block.find('span', class_='sch-date') or block.find('div', class_='cb-font-12')
         if time_elem:
-            time_text = time_elem.get_text(strip=True)
-            # Extract time portion
-            time_match = re.search(r'\d{1,2}:\d{2}\s*(AM|PM)', time_text, re.I)
-            if time_match:
-                start_time = time_match.group(0)
-            else:
-                start_time = time_text
+            start_time = time_elem.get_text(strip=True)
         
         matches.append({
             'id': match_id,
@@ -104,15 +111,10 @@ def extract_live_matches(soup):
         })
     
     # Remove duplicates
-    unique = {}
-    for m in matches:
-        if m['id'] not in unique:
-            unique[m['id']] = m
-    
+    unique = {m['id']: m for m in matches}
     logger.info(f"Extracted {len(unique)} unique matches")
     return list(unique.values())
-
-# ----------------------------------------------------------------------
+ ----------------------------------------------------------------------
 # Scorecard data extraction from CORRECT source
 # ----------------------------------------------------------------------
 def extract_match_data(soup):
