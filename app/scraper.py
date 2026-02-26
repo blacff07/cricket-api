@@ -36,7 +36,7 @@ def fetch_page(url):
         return None, "unknown"
 
 # ----------------------------------------------------------------------
-# OLD WORKING METHOD - SIMPLE ANCHOR TAG EXTRACTION
+# Live matches extraction (WORKING VERSION)
 # ----------------------------------------------------------------------
 def extract_live_matches(soup):
     """Extract live matches from the Cricbuzz homepage using anchor tags."""
@@ -53,6 +53,7 @@ def extract_live_matches(soup):
             continue
         match_id = int(match.group(1))
         
+        # Get title
         title_attr = a.get('title', '')
         if title_attr:
             title = title_attr
@@ -61,7 +62,7 @@ def extract_live_matches(soup):
         if not title:
             continue
         
-        # Clean title
+        # Clean title - remove extra whitespace
         title = re.sub(r'\s+', ' ', title).strip()
         
         # Determine status
@@ -73,18 +74,45 @@ def extract_live_matches(soup):
         else:
             status = "Upcoming"
         
-        # Extract teams
+        # Extract teams - IMPROVED PARSING
         teams = []
+        
+        # Method 1: Look for "Team vs Team" pattern
         vs_match = re.search(r'([A-Za-z\s]+?)\s+vs\s+([A-Za-z\s]+)', title, re.I)
         if vs_match:
             teams = [vs_match.group(1).strip(), vs_match.group(2).strip()]
+        else:
+            # Method 2: Look for country names in the title
+            # Common cricket playing nations
+            countries = [
+                'Afghanistan', 'Australia', 'Bangladesh', 'England', 'India',
+                'Ireland', 'New Zealand', 'Pakistan', 'South Africa', 'Sri Lanka',
+                'West Indies', 'Zimbabwe', 'Afg', 'Aus', 'Ban', 'Eng', 'Ind',
+                'Ire', 'NZ', 'Pak', 'SA', 'SL', 'WI', 'Zim'
+            ]
+            found = []
+            for country in countries:
+                if country.lower() in title.lower():
+                    found.append(country)
+            if len(found) >= 2:
+                teams = found[:2]
+        
+        # Try to get start time from nearby elements
+        start_time = None
+        parent = a.find_parent()
+        if parent:
+            # Look for time pattern in parent
+            time_pattern = re.compile(r'\d{1,2}:\d{2}\s*(?:AM|PM)|Today|Tomorrow', re.I)
+            time_elem = parent.find(string=time_pattern)
+            if time_elem:
+                start_time = time_elem.strip()
         
         matches.append({
             'id': match_id,
             'teams': teams,
             'title': title,
             'status': status,
-            'link': href
+            'start_time': start_time  # May be None initially
         })
     
     # Remove duplicates
@@ -94,37 +122,54 @@ def extract_live_matches(soup):
     return result
 
 # ----------------------------------------------------------------------
-# Scorecard data extraction (from CORRECT source)
+# Start time extraction from match page (for enrichment)
+# ----------------------------------------------------------------------
+def extract_start_time_from_match_page(soup):
+    """Extract start time from the match scorecard page."""
+    start_time = None
+    
+    # Method 1: Look for Date & Time in the info section
+    info_items = soup.find_all('div', class_='cb-col')
+    for item in info_items:
+        text = item.get_text()
+        if 'Date & Time' in text or 'Start Time' in text:
+            # Extract the time part
+            time_match = re.search(r'(\d{1,2}:\d{2}\s*(?:AM|PM).*?LOCAL)', text, re.I)
+            if time_match:
+                return time_match.group(1)
+    
+    # Method 2: Look for time in any element
+    time_pattern = re.compile(r'\d{1,2}:\d{2}\s*(?:AM|PM).*?LOCAL', re.I)
+    time_elem = soup.find(string=time_pattern)
+    if time_elem:
+        return time_elem.strip()
+    
+    # Method 3: Look for time in meta tags or structured data
+    meta_time = soup.find('meta', {'property': 'og:updated_time'}) or soup.find('meta', {'name': 'published_time'})
+    if meta_time and meta_time.get('content'):
+        return meta_time['content']
+    
+    return start_time
+
+# ----------------------------------------------------------------------
+# Scorecard data extraction (unchanged, working)
 # ----------------------------------------------------------------------
 def extract_match_data(soup):
     """Extract detailed match data from scorecard page."""
-    # Title
     title_elem = soup.find('h1', class_='cb-nav-hdr')
     title = title_elem.get_text(strip=True) if title_elem else None
     
-    # Teams from title
     teams = []
     if title and ' vs ' in title:
         parts = title.split(' vs ')
         teams = [parts[0].strip(), parts[1].split(',')[0].strip()]
     
-    # Status
     status = extract_status(soup)
-    
-    # Current score
     current_score = extract_current_score(soup)
-    
-    # Run rate
     run_rate = extract_run_rate(soup)
-    
-    # Batting
     batting = extract_batting(soup)
-    
-    # Bowling
     bowling = extract_bowling(soup)
-    
-    # Start time
-    start_time = extract_start_time(soup)
+    start_time = extract_start_time_from_match_page(soup)
     
     return {
         'title': title,
@@ -185,7 +230,6 @@ def extract_batting(soup):
     batting_rows = soup.find_all('div', class_='cb-scrd-itms')
     
     for row in batting_rows:
-        # Skip bowler rows
         if row.find(string=re.compile(r'Overs|Maidens|Runs|Wkts|Econ')):
             continue
             
@@ -268,17 +312,3 @@ def extract_bowling(soup):
             continue
     
     return bowling
-
-def extract_start_time(soup):
-    """Extract start time from match info section."""
-    info_items = soup.find_all('div', class_='cb-col')
-    for item in info_items:
-        text = item.get_text()
-        if 'Time' in text or 'LOCAL' in text:
-            match = re.search(r'(\d{1,2}:\d{2}\s*(?:AM|PM).*?LOCAL)', text, re.I)
-            if match:
-                return match.group(1)
-    return None
-
-# Alias for compatibility
-extract_start_time_from_match_page = extract_start_time
