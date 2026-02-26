@@ -36,7 +36,7 @@ def fetch_page(url):
         return None, "unknown"
 
 # ----------------------------------------------------------------------
-# Live matches extraction (WORKING VERSION)
+# Live matches extraction with title cleaning
 # ----------------------------------------------------------------------
 def extract_live_matches(soup):
     """Extract live matches from the Cricbuzz homepage using anchor tags."""
@@ -62,7 +62,12 @@ def extract_live_matches(soup):
         if not title:
             continue
         
-        # Clean title - remove extra whitespace
+        # CLEAN THE TITLE
+        # Remove common prefixes
+        title = re.sub(r'^(WATCH NOW|T20I|ODI|Test|FC|T20|OD)\s*', '', title)
+        # Remove duplicate team names (e.g., "IndiaIndia" -> "India")
+        title = re.sub(r'([A-Za-z]+)\1', r'\1', title)
+        # Clean up whitespace
         title = re.sub(r'\s+', ' ', title).strip()
         
         # Determine status
@@ -74,45 +79,46 @@ def extract_live_matches(soup):
         else:
             status = "Upcoming"
         
-        # Extract teams - IMPROVED PARSING
+        # Extract teams - IMPROVED
         teams = []
         
         # Method 1: Look for "Team vs Team" pattern
         vs_match = re.search(r'([A-Za-z\s]+?)\s+vs\s+([A-Za-z\s]+)', title, re.I)
         if vs_match:
-            teams = [vs_match.group(1).strip(), vs_match.group(2).strip()]
+            teams = [clean_team_name(vs_match.group(1)), clean_team_name(vs_match.group(2))]
         else:
-            # Method 2: Look for country names in the title
-            # Common cricket playing nations
-            countries = [
-                'Afghanistan', 'Australia', 'Bangladesh', 'England', 'India',
-                'Ireland', 'New Zealand', 'Pakistan', 'South Africa', 'Sri Lanka',
-                'West Indies', 'Zimbabwe', 'Afg', 'Aus', 'Ban', 'Eng', 'Ind',
-                'Ire', 'NZ', 'Pak', 'SA', 'SL', 'WI', 'Zim'
-            ]
-            found = []
-            for country in countries:
-                if country.lower() in title.lower():
-                    found.append(country)
-            if len(found) >= 2:
-                teams = found[:2]
+            # Method 2: Extract from title
+            # Common team names mapping
+            team_map = {
+                'IND': 'India', 'NZ': 'New Zealand', 'AUS': 'Australia', 
+                'ENG': 'England', 'SA': 'South Africa', 'PAK': 'Pakistan',
+                'SL': 'Sri Lanka', 'WI': 'West Indies', 'BAN': 'Bangladesh',
+                'ZIM': 'Zimbabwe', 'AFG': 'Afghanistan', 'IRE': 'Ireland'
+            }
+            # Look for codes in title
+            for code, full_name in team_map.items():
+                if code in title.upper():
+                    teams.append(full_name)
+                    if len(teams) >= 2:
+                        break
         
-        # Try to get start time from nearby elements
+        # Get start time from nearby elements
         start_time = None
         parent = a.find_parent()
         if parent:
-            # Look for time pattern in parent
-            time_pattern = re.compile(r'\d{1,2}:\d{2}\s*(?:AM|PM)|Today|Tomorrow', re.I)
-            time_elem = parent.find(string=time_pattern)
+            # Look for time elements
+            time_elem = parent.find('span', class_='sch-date')
+            if not time_elem:
+                time_elem = parent.find('div', class_='cb-font-12')
             if time_elem:
-                start_time = time_elem.strip()
+                start_time = time_elem.get_text(strip=True)
         
         matches.append({
             'id': match_id,
-            'teams': teams,
+            'teams': teams[:2],  # Only keep first two
             'title': title,
             'status': status,
-            'start_time': start_time  # May be None initially
+            'start_time': start_time
         })
     
     # Remove duplicates
@@ -121,14 +127,21 @@ def extract_live_matches(soup):
     logger.info(f"Extracted {len(result)} unique matches")
     return result
 
+def clean_team_name(name):
+    """Clean team name by removing duplicates and extra text."""
+    name = re.sub(r'\s+', ' ', name).strip()
+    # Remove duplicate words (e.g., "IndiaIndia" -> "India")
+    name = re.sub(r'([A-Za-z]+)\1', r'\1', name)
+    # Remove common suffixes
+    name = re.sub(r'\s+Women$', '', name)
+    return name
+
 # ----------------------------------------------------------------------
 # Start time extraction from match page (for enrichment)
 # ----------------------------------------------------------------------
 def extract_start_time_from_match_page(soup):
     """Extract start time from the match scorecard page."""
-    start_time = None
-    
-    # Method 1: Look for Date & Time in the info section
+    # Look for Date & Time in the info section
     info_items = soup.find_all('div', class_='cb-col')
     for item in info_items:
         text = item.get_text()
@@ -138,21 +151,16 @@ def extract_start_time_from_match_page(soup):
             if time_match:
                 return time_match.group(1)
     
-    # Method 2: Look for time in any element
+    # Fallback: look for time pattern
     time_pattern = re.compile(r'\d{1,2}:\d{2}\s*(?:AM|PM).*?LOCAL', re.I)
     time_elem = soup.find(string=time_pattern)
     if time_elem:
         return time_elem.strip()
     
-    # Method 3: Look for time in meta tags or structured data
-    meta_time = soup.find('meta', {'property': 'og:updated_time'}) or soup.find('meta', {'name': 'published_time'})
-    if meta_time and meta_time.get('content'):
-        return meta_time['content']
-    
-    return start_time
+    return None
 
 # ----------------------------------------------------------------------
-# Scorecard data extraction (unchanged, working)
+# Scorecard data extraction (unchanged)
 # ----------------------------------------------------------------------
 def extract_match_data(soup):
     """Extract detailed match data from scorecard page."""
@@ -162,7 +170,7 @@ def extract_match_data(soup):
     teams = []
     if title and ' vs ' in title:
         parts = title.split(' vs ')
-        teams = [parts[0].strip(), parts[1].split(',')[0].strip()]
+        teams = [clean_team_name(parts[0]), clean_team_name(parts[1].split(',')[0])]
     
     status = extract_status(soup)
     current_score = extract_current_score(soup)
