@@ -97,7 +97,7 @@ def create_app():
     @cache_ttl(30)
     def live_matches():
         """Return all currently live matches with start times."""
-        url = f"{Config.LIVE_MATCHES_URL}"
+        url = f"{Config.CRICBUZZ_URL}/"
         soup, error = fetch_page(url)
         if soup is None:
             if error == "timeout":
@@ -125,9 +125,7 @@ def create_app():
     @cache_ttl(5)
     def match_live(match_id):
         """Return live score for a specific match."""
-        # CORRECT URL - use scorecard, not commentary
         url = f"{Config.CRICBUZZ_URL}/live-cricket-scorecard/{match_id}"
-        
         soup, error = fetch_page(url)
         if soup is None:
             if error == "timeout":
@@ -163,9 +161,7 @@ def create_app():
         """Return detailed scorecard for a specific match."""
         return match_live(match_id)
 
-    # ------------------------------------------------------------------
     # Legacy endpoints
-    # ------------------------------------------------------------------
     @app.route('/score', methods=['GET'])
     def score_legacy():
         match_id = escape(request.args.get('id', ''))
@@ -177,11 +173,9 @@ def create_app():
         except ValueError:
             return json_error_response()
 
-        # Use scorecard URL for legacy endpoint too
         url = f"{Config.CRICBUZZ_URL}/live-cricket-scorecard/{match_id_int}"
         soup, error = fetch_page(url)
         
-        # Fallback response when data cannot be fetched
         def fallback_response():
             return jsonify({
                 'title': 'Data Not Found',
@@ -209,19 +203,15 @@ def create_app():
             })
 
         if soup is None:
-            logger.error(f"Failed to fetch page for match {match_id_int}: {error}")
             return fallback_response()
 
         data = extract_match_data(soup)
         if not data.get('title'):
-            logger.warning(f"No title found for match {match_id_int}")
             return fallback_response()
 
-        # Format legacy response
         batting = data.get('batting', [])
         bowling = data.get('bowling', [])
         
-        # Take first two batsmen/bowlers for legacy format
         batter_one = batting[0] if len(batting) > 0 else {}
         batter_two = batting[1] if len(batting) > 1 else {}
         bowler_one = bowling[0] if len(bowling) > 0 else {}
@@ -268,7 +258,6 @@ def create_app():
         except ValueError:
             return json_error_response()
 
-        # Get the flat response from score_legacy
         resp = score_legacy()
         data = resp.get_json()
         
